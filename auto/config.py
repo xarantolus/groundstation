@@ -13,7 +13,6 @@ def load_config(path: str) -> Dict[str, Any]:
     # Validate required keys
     required_keys: Dict[str, type] = {
         "satellites": list,
-        "location": dict,
         "nas_directory": str,
     }
     for key, expected_type in required_keys.items():
