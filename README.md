@@ -5,7 +5,7 @@ This repository contains code and documentation for my custom satellite ground s
 ### Hardware Components
 My ground station uses a [Diamond D-3000 Discone 25-3000 MHz N](https://www.wimo.com/de/d-3000n) antenna, which means that I don't need a rotator.
 
-![Antenna in Action](.github/img/antenna.jpg){height=500}
+<img src=".github/img/antenna.jpg" alt="Antenna in Action" style="max-height: 500px; height: auto;" height="500">
 
 For digitizing the signal, an [RTL-SDR Blog v4](https://www.ebay.de/itm/276000566513) and [its LNA](https://www.ebay.de/itm/283455455676) (powered via Bias-Tee) are used, connected to the antenna via a "LMR400 UF UltraFlex Equivalent" cable.
 
