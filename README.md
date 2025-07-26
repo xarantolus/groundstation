@@ -3,7 +3,7 @@ This repository contains code and documentation for my custom satellite ground s
 
 
 ### Hardware Components
-My ground station uses a [Diamond D-3000 Discone 25-3000 MHz N](https://www.wimo.com/de/d-3000n) antenna, which means that I don't need a rotator.
+My ground station uses a [Diamond D-3000 Discone 25-3000 MHz N](https://www.wimo.com/de/d-3000n) antenna, which means that I don't need a rotor.
 
 <img src=".github/img/antenna.jpg" alt="Antenna in Action" style="max-height: 500px; height: auto;" height="500">
 
