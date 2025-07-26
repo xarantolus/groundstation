@@ -264,12 +264,12 @@ def decode_worker(queue: TransferQueueManager, nas_dir: str) -> None:
             # If the next overpass is within the next 5 minutes, wait until it is over and only then start decoding
             global NEXT_OVERPASS
             while NEXT_OVERPASS and (NEXT_OVERPASS["start_time"] - datetime.datetime.now()).total_seconds() < 300:
-                time_until_end = (NEXT_OVERPASS["start_time"] - datetime.datetime.now()).total_seconds()
+                time_until_end = (NEXT_OVERPASS["end_time"] - datetime.datetime.now()).total_seconds()
 
                 logging.info(f"Decoder: Next overpass is within 5 minutes, waiting at least {time_until_end:.1f} seconds until it is over before decoder start")
 
-                if time_until_end < 0:
-                    time.sleep(60)
+                if time_until_end <= 0:
+                    break
                 else:
                     time.sleep(time_until_end + 60)
 
