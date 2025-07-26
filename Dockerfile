@@ -67,7 +67,7 @@ RUN --mount=type=cache,target=/tmp/gr-satnogs \
 	cd /tmp/gr-satnogs && \
 	mkdir -p build && \
 	cd build && \
-	cmake -DCMAKE_BUILD_TYPE=Release .. && \
+	cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_DOXYGEN=OFF .. && \
 	make -j$(nproc) && \
 	make install && \
 	ldconfig

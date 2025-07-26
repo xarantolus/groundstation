@@ -57,7 +57,7 @@ if [ "$PUSH_MODE" = true ]; then
 else
   BUILD_ARGS="$BUILD_ARGS"
 fi
-$CONTAINER_TOOL build $BUILD_ARGS -f Dockerfile
+$CONTAINER_TOOL build $BUILD_ARGS -f Dockerfile .
 if [ "$PUSH_MODE" = true ]; then
   $CONTAINER_TOOL push "$IMAGE_PATH_PREFIX/gs:$IMAGE_TAG"
 fi
