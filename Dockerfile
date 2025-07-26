@@ -39,8 +39,7 @@ RUN --mount=type=cache,target=/var/cache/dnf \
 	python3-devel \
 	xterm
 
-# Satnogs dependency
-RUN	cd /tmp && \
+ RUN	cd /tmp && \
 	wget https://download.savannah.nongnu.org/releases/pngpp/png++-0.2.9.tar.gz && \
 	tar -xzf png++-0.2.9.tar.gz && \
 	cp -r png++-0.2.9 /usr/include/png++ && \
@@ -60,14 +59,14 @@ RUN --mount=type=cache,target=/tmp/itpp-4.3.1 \
 
 RUN --mount=type=cache,target=/tmp/gr-satnogs \
 	if [ -d /tmp/gr-satnogs/.git ]; then \
-		cd /tmp/gr-satnogs && git pull; \
+	cd /tmp/gr-satnogs && git pull; \
 	else \
-		git clone https://gitlab.com/librespacefoundation/satnogs/gr-satnogs.git --recurse-submodules /tmp/gr-satnogs; \
+	git clone https://gitlab.com/librespacefoundation/satnogs/gr-satnogs.git --recurse-submodules /tmp/gr-satnogs; \
 	fi && \
 	cd /tmp/gr-satnogs && \
 	mkdir -p build && \
 	cd build && \
-	cmake -DCMAKE_BUILD_TYPE=Release -DENABLE_DOXYGEN=OFF .. && \
+	cmake -DCMAKE_BUILD_TYPE=Release .. && \
 	make -j$(nproc) && \
 	make install && \
 	ldconfig
@@ -76,9 +75,9 @@ RUN --mount=type=cache,target=/tmp/rtl-sdr-blog \
 	--mount=type=cache,target=/var/cache/dnf \
 	dnf install -y libusb1-devel && \
 	if [ -d /tmp/rtl-sdr-blog/.git ]; then \
-		cd /tmp/rtl-sdr-blog && git pull; \
+	cd /tmp/rtl-sdr-blog && git pull; \
 	else \
-		git clone https://github.com/rtlsdrblog/rtl-sdr-blog.git /tmp/rtl-sdr-blog; \
+	git clone https://github.com/rtlsdrblog/rtl-sdr-blog.git /tmp/rtl-sdr-blog; \
 	fi && \
 	cd /tmp/rtl-sdr-blog && \
 	mkdir -p build && \
@@ -91,9 +90,9 @@ RUN --mount=type=cache,target=/tmp/rtl-sdr-blog \
 
 RUN --mount=type=cache,target=/tmp/gr-osmosdr \
 	if [ -d /tmp/gr-osmosdr/.git ]; then \
-		cd /tmp/gr-osmosdr && git pull; \
+	cd /tmp/gr-osmosdr && git pull; \
 	else \
-		git clone https://gitea.osmocom.org/sdr/gr-osmosdr.git /tmp/gr-osmosdr; \
+	git clone https://gitea.osmocom.org/sdr/gr-osmosdr.git /tmp/gr-osmosdr; \
 	fi && \
 	cd /tmp/gr-osmosdr && \
 	mkdir -p build && \
