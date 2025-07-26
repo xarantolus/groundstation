@@ -1,0 +1,14 @@
+ARG GHCR_REGISTRY=ghcr.io
+ARG GITHUB_REPOSITORY=xarantolus/groundstation
+ARG TAG=latest
+
+FROM ${GHCR_REGISTRY}/${GITHUB_REPOSITORY}/gs:${TAG}
+
+COPY flowgraphs/recorder.grc /tmp/recorder.grc
+
+RUN cd /tmp && \
+	grcc recorder.grc && \
+	mv recorder.py /usr/local/bin/recorder.py && \
+	chmod +x /usr/local/bin/recorder.py
+
+CMD ["recorder.py"]

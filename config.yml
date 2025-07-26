@@ -1,0 +1,83 @@
+satellites:
+  - name: NOAA 19
+    norad: 33591
+    frequency: 137.100e6
+    bandwidth: 68e3
+    sample_rate: 256e3
+    lo_offset: 100e3
+    priority: 5
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: gnu
+        container: ghcr.io/xarantolus/groundstation/noaa-decoder:latest
+      - name: satdump
+        container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
+        args: --satellite_number 19
+        env:
+          PIPELINE_NAME: noaa_apt
+        min_files: 5
+    skip_iq_upload: true
+
+  - name: Meteor M2-3
+    norad: 57166
+    frequency: 137.900e6
+    bandwidth: 150e3
+    sample_rate: 384e3
+    lo_offset: 100e3
+    priority: 10
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: lrpt
+        container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
+        args: --satellite_number M2-3 --fill_missing
+        env:
+          PIPELINE_NAME: meteor_m2_lrpt
+        min_files: 10
+      - name: x_lrpt
+        container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
+        args: --satellite_number M2-3 --fill_missing
+        env:
+          PIPELINE_NAME: meteor_m2-x_lrpt
+        min_files: 10
+      - name: x_lrpt_80k
+        container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
+        args: --satellite_number M2-3 --fill_missing
+        env:
+          PIPELINE_NAME: meteor_m2-x_lrpt_80k
+        min_files: 10
+    skip_iq_upload: true
+
+  - name: Meteor M2-4
+    norad: 59051
+    frequency: 137.900e6
+    bandwidth: 150e3
+    sample_rate: 384e3
+    lo_offset: 100e3
+    priority: 10
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: lrpt
+        container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
+        args: --satellite_number M2-4 --fill_missing
+        env:
+          PIPELINE_NAME: meteor_m2_lrpt
+        min_files: 10
+      - name: x_lrpt
+        container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
+        args: --satellite_number M2-4 --fill_missing
+        env:
+          PIPELINE_NAME: meteor_m2-x_lrpt
+        min_files: 10
+      - name: x_lrpt_80k
+        container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
+        args: --satellite_number M2-4 --fill_missing
+        env:
+          PIPELINE_NAME: meteor_m2-x_lrpt_80k
+        min_files: 10
+    skip_iq_upload: true
+
+nas_directory: /mnt/nas
+
+pass_elevation_threshold_deg: 10
+pass_start_threshold: 5
+update_interval_hours: 24

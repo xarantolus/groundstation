@@ -1,0 +1,11 @@
+recordings
+*.png
+flowgraphs/*.py
+*.env*
+*.bin
+*.zst*
+*info*.json*
+*.gz*
+*.state
+**__pycache__**
+*.raw
