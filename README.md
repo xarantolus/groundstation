@@ -1,5 +1,7 @@
 # Ground Station
-This repository contains code and documentation for my custom satellite ground station. I use it to receive amateur satellite signals and weather satellites.
+This repository contains code and documentation for my custom satellite ground station. I use it to receive amateur satellite signals and weather satellites, like the following image from the NOAA 19 satellite:
+
+![NOAA APT Image](.github/img/noaa_apt.png)
 
 
 ### Hardware Components

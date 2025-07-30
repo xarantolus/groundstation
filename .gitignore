@@ -9,3 +9,4 @@ flowgraphs/*.py
 *.state
 **__pycache__**
 *.raw
+!.github/img/*
