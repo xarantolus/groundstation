@@ -9,7 +9,10 @@ if [ -z "$GITHUB_REPOSITORY_OWNER" ]; then
 
   if [[ $REPO_URL =~ github\.com[:/]([^/]+)/([^/]+)(\.git)?/?$ ]]; then
     REPO_OWNER="$(echo "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')"
-    REPO_NAME="$REPO_OWNER/$(echo "${BASH_REMATCH[2]}" | tr '[:upper:]' '[:lower:]')"
+    REPO_NAME_PART="${BASH_REMATCH[2]}"
+    # Remove .git suffix if present
+    REPO_NAME_PART="${REPO_NAME_PART%.git}"
+    REPO_NAME="$REPO_OWNER/$(echo "$REPO_NAME_PART" | tr '[:upper:]' '[:lower:]')"
   else
     echo "Error: Unable to extract repository information from git URL."
     exit 1
