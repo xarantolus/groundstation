@@ -28,7 +28,7 @@ def run_recorder(sat_conf: Satellite, stop_after: float, out_dir: str) -> str:
         f"OUTPUT_FILE=/data/recording.bin",
     ]
     cmd: List[str] = [
-        "podman", "run", "--rm",
+        "podman", "run", "--rm", "--read-only",
         *(['--userns=keep-id'] if not is_root() else []),
         *sum([["-e", e] for e in envs], []),
         "--device", "/dev/bus/usb:/dev/bus/usb",
@@ -84,7 +84,7 @@ def run_decoder(sat_conf: Satellite, decoder: Decoder, pass_dir: str):
         envs.append(f"{k}={v}")
 
     cmd: List[str] = [
-        "podman", "run", "--rm",
+        "podman", "run", "--rm", "--read-only",
         *(['--userns=keep-id'] if not is_root() else []),
         *sum([["-e", e] for e in envs], []),
         *shlex.split(decoder.get("podman_args", "")),
