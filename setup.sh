@@ -7,7 +7,7 @@ IMAGE_TAG="latest"
 if [ -z "$GITHUB_REPOSITORY_OWNER" ]; then
   REPO_URL=$(git config --get remote.origin.url)
 
-  if [[ "$REPO_URL" =~ github.com[:/](.*)/(.*).git ]]; then
+  if [[ $REPO_URL =~ github\.com[:/]([^/]+)/([^/]+)(\.git)?/?$ ]]; then
     REPO_OWNER="$(echo "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')"
     REPO_NAME="$REPO_OWNER/$(echo "${BASH_REMATCH[2]}" | tr '[:upper:]' '[:lower:]')"
   else
