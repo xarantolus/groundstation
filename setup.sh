@@ -66,7 +66,7 @@ if [ "$PUSH_MODE" = true ]; then
 fi
 
 # Build satellite-recorder
-BUILD_ARGS="--pull=never --platform $PLATFORM -t $IMAGE_PATH_PREFIX/satellite-recorder:$IMAGE_TAG --build-arg TAG=$IMAGE_TAG --build-arg GITHUB_REPOSITORY=$REPO_NAME"
+BUILD_ARGS="--pull=missing --platform $PLATFORM -t $IMAGE_PATH_PREFIX/satellite-recorder:$IMAGE_TAG --build-arg TAG=$IMAGE_TAG --build-arg GITHUB_REPOSITORY=$REPO_NAME"
 if [ "$PUSH_MODE" = true ]; then
   BUILD_ARGS="$BUILD_ARGS --cache-from=$IMAGE_PATH_PREFIX/satellite-recorder-cache --cache-to=$IMAGE_PATH_PREFIX/satellite-recorder-cache"
 else
@@ -82,7 +82,7 @@ cd decoders
 
 # Build NOAA decoder
 cd noaa_apt
-BUILD_ARGS="--pull=never --platform $PLATFORM -t $IMAGE_PATH_PREFIX/noaa-decoder:$IMAGE_TAG --build-arg TAG=$IMAGE_TAG --build-arg GITHUB_REPOSITORY=$REPO_NAME"
+BUILD_ARGS="--pull=missing --platform $PLATFORM -t $IMAGE_PATH_PREFIX/noaa-decoder:$IMAGE_TAG --build-arg TAG=$IMAGE_TAG --build-arg GITHUB_REPOSITORY=$REPO_NAME"
 if [ "$PUSH_MODE" = true ]; then
   BUILD_ARGS="$BUILD_ARGS --cache-from=$IMAGE_PATH_PREFIX/noaa-decoder-cache --cache-to=$IMAGE_PATH_PREFIX/noaa-decoder-cache"
 else
@@ -96,7 +96,7 @@ fi
 
 # Build satdump decoder
 cd satdump
-BUILD_ARGS="--pull=never --platform $PLATFORM -t $IMAGE_PATH_PREFIX/satdump-decoder:$IMAGE_TAG --build-arg TAG=$IMAGE_TAG --build-arg GITHUB_REPOSITORY=$REPO_NAME"
+BUILD_ARGS="--pull=missing --platform $PLATFORM -t $IMAGE_PATH_PREFIX/satdump-decoder:$IMAGE_TAG --build-arg TAG=$IMAGE_TAG --build-arg GITHUB_REPOSITORY=$REPO_NAME"
 if [ "$PUSH_MODE" = true ]; then
   BUILD_ARGS="$BUILD_ARGS --cache-from=$IMAGE_PATH_PREFIX/satdump-decoder-cache --cache-to=$IMAGE_PATH_PREFIX/satdump-decoder-cache"
 else
@@ -110,7 +110,7 @@ fi
 
 # Build waterfall
 cd waterfall
-BUILD_ARGS="--pull=never --platform $PLATFORM -t $IMAGE_PATH_PREFIX/waterfall:$IMAGE_TAG --build-arg TAG=$IMAGE_TAG --build-arg GITHUB_REPOSITORY=$REPO_NAME"
+BUILD_ARGS="--pull=missing --platform $PLATFORM -t $IMAGE_PATH_PREFIX/waterfall:$IMAGE_TAG --build-arg TAG=$IMAGE_TAG --build-arg GITHUB_REPOSITORY=$REPO_NAME"
 if [ "$PUSH_MODE" = true ]; then
   BUILD_ARGS="$BUILD_ARGS --cache-from=$IMAGE_PATH_PREFIX/waterfall-cache --cache-to=$IMAGE_PATH_PREFIX/waterfall-cache"
 else
