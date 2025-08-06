@@ -9,6 +9,11 @@ from common import Decoder, Satellite
 
 RECORDER_IMAGE = "ghcr.io/xarantolus/groundstation/satellite-recorder:latest"
 
+COMMON_FLAGS= [
+    # Mount /root/.config/gnuradio/prefs to home directory
+    "-v", f"{os.path.expanduser('~')}/.config/gnuradio/prefs:/root/.config/gnuradio/prefs:z",
+]
+
 def is_root() -> bool:
     return os.getuid() == 0
 
@@ -29,6 +34,7 @@ def run_recorder(sat_conf: Satellite, stop_after: float, out_dir: str) -> str:
     ]
     cmd: List[str] = [
         "podman", "run", "--rm", "--read-only",
+        *COMMON_FLAGS,
         *(['--userns=keep-id'] if not is_root() else []),
         *sum([["-e", e] for e in envs], []),
         "--device", "/dev/bus/usb:/dev/bus/usb",
@@ -85,6 +91,7 @@ def run_decoder(sat_conf: Satellite, decoder: Decoder, pass_dir: str):
 
     cmd: List[str] = [
         "podman", "run", "--rm", "--read-only",
+        *COMMON_FLAGS,
         *(['--userns=keep-id'] if not is_root() else []),
         *sum([["-e", e] for e in envs], []),
         *shlex.split(decoder.get("podman_args", "")),
