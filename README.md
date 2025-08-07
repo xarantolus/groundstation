@@ -36,6 +36,11 @@ Next, build the containers for the device:
 sudo ./setup.sh
 ```
 
+Also, on the target device (Raspberry Pi), create this directory for GNU Radio:
+```
+mkdir -p /root/.config/gnuradio/prefs
+```
+
 #### Configuration
 
 Configure a `.env` file to include the following values and put it into the root of this repository:
