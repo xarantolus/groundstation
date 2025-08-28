@@ -23,6 +23,28 @@ Basically follow the instructions [for the RTL-SDR Blog V4 here](https://www.rtl
 echo 'blacklist dvb_usb_rtl28xxu' | sudo tee --append /etc/modprobe.d/blacklist-dvb_usb_rtl28xxu.conf
 ```
 
+Additionally, if the Raspberry Pi is connected via WIFI, set it to auto-reconnect forever:
+
+```
+nmcli connection show # find network
+nmcli connection modify <network name> connection.autoconnect-retries 0 # <- forever
+```
+
+And it can also make sense to add these crontab entries (`sudo crontab -e`):
+
+```
+# Remove outdated recordings
+@reboot rm -rf /tmp/recorder*
+0 2 * * * find /tmp -maxdepth 1 -type d -name 'recorder*' -amin +1440 -exec rm -rf {} \;
+
+# Reboot at night if we lost connection to the NAS
+30 2 * * * if ! ping -c 5 <NAS hostname> > /dev/null 2>&1; then /sbin/reboot; fi
+
+# Clear podman containers / build cache - also useful for normal user
+0 0 * * * podman system prune -f --filter "until=336h"
+0 0 * * * podman builder prune -f --filter "until=336h"
+```
+
 #### Installation
 Some dependencies need to be installed for this all to work:
 
