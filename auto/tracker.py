@@ -8,6 +8,7 @@ import argparse
 import datetime
 import requests
 import logging
+import collections
 from typing import List, Tuple, Dict, Any, Union, Optional
 
 # Rich UI imports
@@ -17,7 +18,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.progress import Progress, BarColumn, TextColumn, TaskProgressColumn, DownloadColumn, TransferSpeedColumn, TimeRemainingColumn
 from rich.logging import RichHandler
-from rich.console import Console, Group
+from rich.console import Console, Group, RenderableType, ConsoleOptions, RenderResult
 from rich.status import Status
 
 from common import Decoder, Satellite, PassInfo, IQ_DATA_FILE_EXTENSION
@@ -28,13 +29,27 @@ from transfer import TransferQueueManager, file_transfer_worker
 # Constants
 QUEUE_STATE_FILE = "transfer_queue.state"
 
-# Configure logging with Rich
+class LogBufferHandler(logging.Handler):
+    """A logging handler that keeps the last N log messages in a buffer."""
+    def __init__(self, capacity: int = 100):
+        super().__init__()
+        self.buffer = collections.deque(maxlen=capacity)
+
+    def emit(self, record):
+        try:
+            msg = self.format(record)
+            self.buffer.append(msg)
+        except Exception:
+            self.handleError(record)
+
+# Configure logging
 console = Console()
+log_handler = LogBufferHandler(capacity=50)
+log_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s", datefmt="%H:%M:%S"))
+
 logging.basicConfig(
     level=logging.INFO,
-    format="%(message)s",
-    datefmt="[%X]",
-    handlers=[RichHandler(console=console, rich_tracebacks=True)]
+    handlers=[log_handler, RichHandler(console=console, rich_tracebacks=True)]
 )
 logger = logging.getLogger("groundstation")
 
@@ -59,22 +74,6 @@ def azimuth_degrees_to_direction(azimuth: float) -> str:
         return "NW"
     else:
         raise ValueError("Invalid azimuth value")
-
-
-def pass_to_string_short(sat: Satellite, pass_info: PassInfo) -> str:
-    """Returns a short string representation of a pass."""
-    start_time_str = pass_info["start_time"].strftime("%H:%M:%S")
-    end_time_str = pass_info["end_time"].strftime("%H:%M:%S")
-
-    start_az = azimuth_degrees_to_direction(pass_info["start_azimuth"]).ljust(2)
-    max_az = azimuth_degrees_to_direction(pass_info["max_azimuth"]).ljust(2)
-    end_az = azimuth_degrees_to_direction(pass_info["end_azimuth"]).ljust(2)
-
-    return (
-        f"{sat['name'].ljust(15)} | {start_time_str} - {end_time_str} | "
-        f"{pass_info['duration_minutes']:.1f}m | Max El: {pass_info['max_elevation']:.1f}° | "
-        f"{start_az}->{max_az}->{end_az}"
-    )
 
 
 class PassManager:
@@ -291,7 +290,6 @@ class RichTUI:
         self.next_passes: List[Tuple[Satellite, PassInfo]] = []
         self.layout = Layout()
         self._setup_layout()
-        self.live = Live(self.layout, refresh_per_second=2, screen=True)
 
     def _setup_layout(self):
         self.layout.split(
@@ -302,7 +300,6 @@ class RichTUI:
             Layout(name="passes", ratio=2),
             Layout(name="transfers", ratio=1)
         )
-        self.layout["bottom"].update(Panel("", title="Log"))
 
     def update_passes(self, passes: List[Tuple[Satellite, PassInfo]]):
         self.next_passes = passes
@@ -339,16 +336,22 @@ class RichTUI:
         for path, data in active.items():
             fname = os.path.basename(path)
             progress_group.append(f"{fname}")
-            # Simplified progress bar string since we are in a panel
             prog = data["progress"]
             bar = "█" * int(prog / 5) + "░" * (20 - int(prog / 5))
             progress_group.append(f"[{bar}] {prog:>3.0f}%")
 
         return Panel(Group(*progress_group), title="Active Transfers")
 
+    def _generate_log_panel(self) -> Panel:
+        return Panel("\n".join(list(log_handler.buffer)), title="Log")
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        yield self.__call__()
+
     def __call__(self) -> Layout:
         self.layout["passes"].update(self._generate_passes_table())
         self.layout["transfers"].update(self._generate_transfers_panel())
+        self.layout["bottom"].update(self._generate_log_panel())
         return self.layout
 
 
@@ -374,14 +377,10 @@ class Orchestrator:
 
     def start(self):
         """Starts the orchestrator."""
-        # Start threads
         threading.Thread(target=file_transfer_worker, daemon=True, args=(self.transfer_manager,)).start()
         threading.Thread(target=self.decode_worker, daemon=True).start()
 
-        # Connect TUI progress update
-        self.transfer_manager.on_progress_update = lambda: None # Handled by Live display refresh
-
-        with self.tui.live:
+        with Live(self.tui, console=console, screen=True, refresh_per_second=4):
             while True:
                 logger.info("Updating pass predictions...")
                 next_passes = self.pass_manager.predict_all(
@@ -407,9 +406,8 @@ class Orchestrator:
 
                     wait_time = (pass_info["start_time"] - datetime.datetime.now()).total_seconds() - 30
                     if wait_time > 0:
-                        logger.info(f"Waiting for {sat['name']} starts in {wait_time/60:.1f}m")
-                        # Sleep in chunks to allow UI updates and log messages
-                        chunk = 60
+                        logger.info(f"Waiting for {sat['name']} (starts in {wait_time/60:.1f}m)")
+                        chunk = 5
                         while wait_time > 0:
                             time.sleep(min(chunk, wait_time))
                             wait_time -= chunk
@@ -473,7 +471,6 @@ class Orchestrator:
             try:
                 pass_dir, pass_info, sat = self.decode_queue.get()
 
-                # Wait if next pass is very soon
                 while True:
                     time_to_next = (self.next_overpass["start_time"] - datetime.datetime.now()).total_seconds() if self.next_overpass else 999
                     if 0 < time_to_next < 300:
@@ -501,7 +498,6 @@ def main():
     p.add_argument("-c", "--config", default="config.yml", help="Path to YAML config file")
     args = p.parse_args()
 
-    # Load environment variables
     from dotenv import load_dotenv
     load_dotenv()
 
