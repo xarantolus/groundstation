@@ -2,8 +2,10 @@ import logging
 import os
 import subprocess
 import shlex
-from typing import List
+import threading
+import io
 import shutil
+from typing import List, Callable, Optional
 from common import Decoder, Satellite
 
 RECORDER_IMAGE = "ghcr.io/xarantolus/groundstation/satellite-recorder:latest"
@@ -16,16 +18,20 @@ COMMON_FLAGS = [
 
 
 def is_root() -> bool:
+    import platform
+    if platform.system() == "Windows":
+        return False # podman on windows usually isn't "root" in the same way
     return os.getuid() == 0
 
 
-def run_recorder(sat_conf: Satellite, stop_after: float, out_dir: str) -> str:
+def run_recorder(sat_conf: Satellite, stop_after: float, out_dir: str, log_callback: Optional[Callable[[str], None]] = None) -> str:
     """
     Runs a podman container to record the pass. Returns path to output file.
 
     sat_conf: Dictionary with satellite configuration
     stop_after: Time in minutes to stop recording after the pass starts
     out_dir: Directory where the recording will be saved
+    log_callback: Optional callback for streaming logs
     """
     envs: List[str] = [
         f"FREQUENCY={sat_conf['frequency']}",
@@ -50,8 +56,21 @@ def run_recorder(sat_conf: Satellite, stop_after: float, out_dir: str) -> str:
     ]
     logging.info(f"Running recorder: {' '.join(cmd)}")
 
-    # Start the process and wait for it to complete or for timeout
-    process = subprocess.Popen(cmd)
+    # Start the process with pipes for stdout/stderr
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False)
+
+    def reader_thread(pipe, prefix=""):
+        try:
+            for line in io.TextIOWrapper(pipe, encoding="utf-8", errors="replace"):
+                if log_callback:
+                    log_callback(f"{prefix}{line.strip()}")
+        except Exception as e:
+            logging.debug(f"Reader thread error: {e}")
+
+    t1 = threading.Thread(target=reader_thread, args=(process.stdout,), daemon=True)
+    t2 = threading.Thread(target=reader_thread, args=(process.stderr, "ERR: "), daemon=True)
+    t1.start()
+    t2.start()
 
     try:
         process.wait(timeout=stop_after * 60)
@@ -72,7 +91,7 @@ def run_recorder(sat_conf: Satellite, stop_after: float, out_dir: str) -> str:
     return out_file
 
 
-def run_decoder(sat_conf: Satellite, decoder: Decoder, pass_dir: str):
+def run_decoder(sat_conf: Satellite, decoder: Decoder, pass_dir: str, log_callback: Optional[Callable[[str], None]] = None):
     """
     Runs a podman container to decode the recording.
     Returns a list of absolute paths to new files created by the decoder.
@@ -80,6 +99,7 @@ def run_decoder(sat_conf: Satellite, decoder: Decoder, pass_dir: str):
     Args:
         sat_conf: Dictionary with satellite configuration
         pass_dir: Directory where the recording is stored and where outputs will be saved
+        log_callback: Optional callback for streaming logs
     """
 
     pass_out_dir = pass_dir
@@ -118,9 +138,22 @@ def run_decoder(sat_conf: Satellite, decoder: Decoder, pass_dir: str):
 
     logging.info(f"Running decoder: {' '.join(cmd)}")
 
-    # We intentionally do not check the return code of the decoder process
-    # E.g. satdump may crash, but we still want to upload files it created
-    subprocess.run(cmd)
+    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False)
+
+    def reader_thread(pipe, prefix=""):
+        try:
+            for line in io.TextIOWrapper(pipe, encoding="utf-8", errors="replace"):
+                if log_callback:
+                    log_callback(f"{prefix}{line.strip()}")
+        except Exception as e:
+            logging.debug(f"Reader thread error: {e}")
+
+    t1 = threading.Thread(target=reader_thread, args=(process.stdout,), daemon=True)
+    t2 = threading.Thread(target=reader_thread, args=(process.stderr, "ERR: "), daemon=True)
+    t1.start()
+    t2.start()
+
+    process.wait()
 
     # Count how many files were created, recursively
     files = []

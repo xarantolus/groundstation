@@ -9,7 +9,7 @@ import datetime
 import requests
 import logging
 import collections
-from typing import List, Tuple, Dict, Any, Union, Optional
+from typing import List, Tuple, Dict, Any, Union, Optional, Callable
 
 # Rich UI imports
 from rich.live import Live
@@ -291,6 +291,8 @@ class RichTUI:
     def __init__(self, transfer_manager: TransferQueueManager):
         self.transfer_manager = transfer_manager
         self.next_passes: List[Tuple[Satellite, PassInfo]] = []
+        self.decoder_logs = collections.deque(maxlen=20)
+        self.is_decoding = False
         self.layout = Layout()
         self._setup_layout()
 
@@ -303,9 +305,16 @@ class RichTUI:
             Layout(name="passes", ratio=2),
             Layout(name="transfers", ratio=1)
         )
+        self.layout["bottom"].split_row(
+            Layout(name="main_log"),
+            Layout(name="decoder_log", visible=False)
+        )
 
     def update_passes(self, passes: List[Tuple[Satellite, PassInfo]]):
         self.next_passes = passes
+
+    def add_decoder_log(self, msg: str):
+        self.decoder_logs.append(msg)
 
     def _generate_passes_table(self) -> Table:
         table = Table(title="Next Overpasses", expand=True)
@@ -348,13 +357,23 @@ class RichTUI:
     def _generate_log_panel(self) -> Panel:
         return Panel("\n".join(list(log_handler.buffer)), title="Log")
 
+    def _generate_decoder_log_panel(self) -> Panel:
+        return Panel("\n".join(list(self.decoder_logs)), title="Decoder Log", border_style="cyan")
+
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
         yield self.__call__()
 
     def __call__(self) -> Layout:
         self.layout["passes"].update(self._generate_passes_table())
         self.layout["transfers"].update(self._generate_transfers_panel())
-        self.layout["bottom"].update(self._generate_log_panel())
+        self.layout["main_log"].update(self._generate_log_panel())
+
+        if self.is_decoding:
+            self.layout["decoder_log"].visible = True
+            self.layout["decoder_log"].update(self._generate_decoder_log_panel())
+        else:
+            self.layout["decoder_log"].visible = False
+
         return self.layout
 
 
@@ -425,7 +444,11 @@ class Orchestrator:
         logger.info(f"Starting pass for {sat['name']} (Max Elev: {pass_info['max_elevation']:.1f}°)")
         try:
             tmp_dir = tempfile.mkdtemp(prefix="recorder")
-            run_recorder(sat, pass_info["duration_minutes"] + 1, tmp_dir)
+
+            def recorder_log(line: str):
+                logger.info(f"Recorder: {line}")
+
+            run_recorder(sat, pass_info["duration_minutes"] + 1, tmp_dir, log_callback=recorder_log)
 
             pass_info_file = os.path.join(tmp_dir, "info.json")
             with open(pass_info_file, "w") as f:
@@ -483,17 +506,32 @@ class Orchestrator:
                         break
 
                 logger.info(f"Starting decoding for {sat['name']}")
+                self.tui.is_decoding = True
+                self.tui.decoder_logs.clear()
+
+                def decoder_log(line: str):
+                    self.tui.add_decoder_log(line)
+                    # Also write to log file, but not to the TUI main log panel
+                    # We can use the logger's file handler directly or just logger.info and filter it?
+                    # Actually user said "decoder output should only be shown in the log file and in a second log window"
+                    # So we should avoid logger.info() because that goes to primary TUI log.
+                    # We can log to the file handler specifically.
+                    record = logging.LogRecord("decoder", logging.INFO, None, None, line, None, None)
+                    file_handler.emit(record)
+
                 decoders = sat["decoder"] if isinstance(sat["decoder"], list) else [sat["decoder"]]
                 for decoder in decoders:
                     try:
-                        run_decoder(sat, decoder, pass_dir)
+                        run_decoder(sat, decoder, pass_dir, log_callback=decoder_log)
                     except Exception as e:
                         logger.error(f"Decoder error for {sat['name']}: {e}")
 
+                self.tui.is_decoding = False
                 self.stage_for_transfer(pass_dir, pass_info, sat)
                 self.decode_queue.task_done()
             except Exception as e:
                 logger.error(f"Decode worker error: {e}")
+                self.tui.is_decoding = False
 
 
 def main():
