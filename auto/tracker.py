@@ -209,7 +209,7 @@ def stage_directory(queue: TransferQueueManager, nas_dir: str, pass_dir: str, pa
     """
     transfer_requests = []
 
-    dst_prefix = os.path.join(nas_dir, pass_info["start_time"].strftime("%Y-%m-%d"),
+    dst_prefix = os.path.join(nas_dir, pass_info["start_time"].strftime("%Y"), pass_info["start_time"].strftime("%Y-%m-%d"),
                     f"{sat['name']}_{pass_info['start_time'].strftime('%Y-%m-%d_%H-%M-%S')}")
 
     file_sizes : Dict[str, int] = {}
