@@ -9,11 +9,13 @@ import time
 
 from common import IQ_DATA_FILE_EXTENSION
 
+
 class TransferQueueManager:
     """
     Manages the file transfer queue with persistent state tracking.
     Thread-safe implementation for adding/removing items and updating state file.
     """
+
     def __init__(self, state_file_path="transfer_queue.state"):
         self.state_file_path = state_file_path
         self._queue = queue.Queue()
@@ -33,7 +35,9 @@ class TransferQueueManager:
                 self._items.append(item)
                 self._save_state()
 
-        logging.debug(f"Added to transfer queue: {os.path.basename(source_path)} -> {destination_path}")
+        logging.debug(
+            f"Added to transfer queue: {os.path.basename(source_path)} -> {destination_path}"
+        )
         return True
 
     def get_next_item(self, block=True, timeout=None):
@@ -74,7 +78,7 @@ class TransferQueueManager:
     def _save_state(self):
         """Save the current queue state to a file (internal use)"""
         try:
-            with open(self.state_file_path, 'wb') as f:
+            with open(self.state_file_path, "wb") as f:
                 pickle.dump(self._items, f)
 
             logging.debug(f"Saved transfer queue state: {len(self._items)} items")
@@ -85,7 +89,7 @@ class TransferQueueManager:
         """Load the queue state from file if it exists (internal use)"""
         try:
             if os.path.exists(self.state_file_path):
-                with open(self.state_file_path, 'rb') as f:
+                with open(self.state_file_path, "rb") as f:
                     self._items = pickle.load(f)
 
                 # Add any loaded items to the queue
@@ -95,6 +99,7 @@ class TransferQueueManager:
                 logging.info(f"Loaded transfer queue state: {len(self._items)} items")
         except Exception as e:
             logging.error(f"Failed to load transfer queue state: {e}")
+
 
 def file_transfer_worker(transfer_queue: TransferQueueManager):
     """Worker thread that processes file transfers sequentially and maintains state"""
@@ -106,7 +111,9 @@ def file_transfer_worker(transfer_queue: TransferQueueManager):
 
             # Skip files that don't exist anymore
             if not os.path.exists(source_path):
-                logging.warning(f"Source file no longer exists: {source_path}. Skipping transfer.")
+                logging.warning(
+                    f"Source file no longer exists: {source_path}. Skipping transfer."
+                )
                 transfer_queue.remove_item((source_path, destination_path, attempt_nr))
                 transfer_queue.task_done()
                 continue
@@ -115,7 +122,19 @@ def file_transfer_worker(transfer_queue: TransferQueueManager):
             if source_path.endswith(IQ_DATA_FILE_EXTENSION):
                 try:
                     compressed_path = source_path + ".zst"
-                    subprocess.run(["zstd", "--no-progress", "-9", "-f", "-v", source_path, "-o", compressed_path], check=True)
+                    subprocess.run(
+                        [
+                            "zstd",
+                            "--no-progress",
+                            "-9",
+                            "-f",
+                            "-v",
+                            source_path,
+                            "-o",
+                            compressed_path,
+                        ],
+                        check=True,
+                    )
                     logging.info(f"Compressed {source_path} to {compressed_path}")
                     os.remove(source_path)
 
@@ -128,14 +147,18 @@ def file_transfer_worker(transfer_queue: TransferQueueManager):
                     source_path = compressed_path
                     destination_path = destination_path + ".zst"
                 except Exception as e:
-                    logging.error(f"Error compressing {source_path} - uploading anyways: {e}")
+                    logging.error(
+                        f"Error compressing {source_path} - uploading anyways: {e}"
+                    )
 
             # Get file size before transfer
             file_size_bytes = os.path.getsize(source_path)
             file_size_mb = file_size_bytes / (1024 * 1024)
 
-            logging.info(f"Starting file transfer to NAS: {os.path.basename(destination_path)} | Size: {file_size_mb:.2f} MB"
-                         + (f" | Attempt: {attempt_nr}" if attempt_nr > 0 else ""))
+            logging.info(
+                f"Starting file transfer to NAS: {os.path.basename(destination_path)} | Size: {file_size_mb:.2f} MB"
+                + (f" | Attempt: {attempt_nr}" if attempt_nr > 0 else "")
+            )
 
             os.makedirs(os.path.dirname(destination_path), exist_ok=True)
 
@@ -144,15 +167,23 @@ def file_transfer_worker(transfer_queue: TransferQueueManager):
             end_time = time.time()
 
             transfer_duration_seconds = end_time - start_time
-            transfer_speed_mbps = file_size_mb / transfer_duration_seconds if transfer_duration_seconds > 0 else 0
+            transfer_speed_mbps = (
+                file_size_mb / transfer_duration_seconds
+                if transfer_duration_seconds > 0
+                else 0
+            )
 
-            logging.info(f"Completed file transfer to NAS: {destination_path} | "
-                         f"Size: {file_size_mb:.2f} MB | "
-                         f"Duration: {transfer_duration_seconds:.2f} seconds | "
-                         f"Speed: {transfer_speed_mbps:.2f} MB/s")
+            logging.info(
+                f"Completed file transfer to NAS: {destination_path} | "
+                f"Size: {file_size_mb:.2f} MB | "
+                f"Duration: {transfer_duration_seconds:.2f} seconds | "
+                f"Speed: {transfer_speed_mbps:.2f} MB/s"
+            )
 
             # Remove from tracking list once completed
-            transfer_queue.remove_item((original_source_path, destination_path, attempt_nr))
+            transfer_queue.remove_item(
+                (original_source_path, destination_path, attempt_nr)
+            )
             transfer_queue.task_done()
 
         except Exception as e:
@@ -165,18 +196,26 @@ def file_transfer_worker(transfer_queue: TransferQueueManager):
                 transfer_queue.remove_item((source_path, destination_path, attempt_nr))
                 transfer_queue.add_item(*new_attempt)
 
-                logging.info(f"Transfer will be retried for {os.path.basename(destination_path)}")
+                logging.info(
+                    f"Transfer will be retried for {os.path.basename(destination_path)}"
+                )
             else:
-                logging.error(f"Failed to transfer file after 3 attempts: {os.path.basename(destination_path)}")
+                logging.error(
+                    f"Failed to transfer file after 3 attempts: {os.path.basename(destination_path)}"
+                )
                 # Remove from tracking list
-                transfer_queue.remove_item((source_path, original_destination_path, attempt_nr))
+                transfer_queue.remove_item(
+                    (source_path, original_destination_path, attempt_nr)
+                )
 
                 # Delete the file if transfer fails after 3 attempts
                 try:
                     os.remove(source_path)
                     logging.info(f"Deleted file after failed transfer: {source_path}")
                 except Exception as e:
-                    logging.error(f"Error deleting file after failed transfer: {str(e)}")
+                    logging.error(
+                        f"Error deleting file after failed transfer: {str(e)}"
+                    )
 
         # If the dir is empty, remove it
         try:

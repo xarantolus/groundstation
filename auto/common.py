@@ -1,9 +1,9 @@
-
 import datetime
 from typing import Dict, List, TypedDict
 
 
-IQ_DATA_FILE_EXTENSION=".bin"
+IQ_DATA_FILE_EXTENSION = ".bin"
+
 
 class Decoder(TypedDict):
     # if name is given and more than one decoder is defined, a subdirectory will be created in the overpass directory
@@ -15,6 +15,7 @@ class Decoder(TypedDict):
     # if less than this number of output files are created, nothing will be uploaded
     min_files: int | None
 
+
 class Satellite(TypedDict):
     name: str
     norad: str
@@ -25,6 +26,7 @@ class Satellite(TypedDict):
     decoder: Decoder | List[Decoder] | None
     lo_offset: float | None
     skip_iq_upload: bool | None
+
 
 class PassInfo(TypedDict):
     start_time: datetime.datetime

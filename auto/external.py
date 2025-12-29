@@ -1,4 +1,3 @@
-
 import logging
 import os
 import subprocess
@@ -9,13 +8,16 @@ from common import Decoder, Satellite
 
 RECORDER_IMAGE = "ghcr.io/xarantolus/groundstation/satellite-recorder:latest"
 
-COMMON_FLAGS= [
+COMMON_FLAGS = [
     # Mount /root/.config/gnuradio/prefs to home directory
-    "-v", f"{os.path.expanduser('~')}/.config/gnuradio/prefs:/root/.config/gnuradio/prefs:z",
+    "-v",
+    f"{os.path.expanduser('~')}/.config/gnuradio/prefs:/root/.config/gnuradio/prefs:z",
 ]
+
 
 def is_root() -> bool:
     return os.getuid() == 0
+
 
 def run_recorder(sat_conf: Satellite, stop_after: float, out_dir: str) -> str:
     """
@@ -30,16 +32,21 @@ def run_recorder(sat_conf: Satellite, stop_after: float, out_dir: str) -> str:
         f"BANDWIDTH={sat_conf['bandwidth']}",
         f"SAMP_RATE={sat_conf['sample_rate']}",
         f"LO_OFFSET={sat_conf.get('lo_offset', 0)}",
-        f"OUTPUT_FILE=/data/recording.bin",
+        "OUTPUT_FILE=/data/recording.bin",
     ]
     cmd: List[str] = [
-        "podman", "run", "--rm", "--read-only",
+        "podman",
+        "run",
+        "--rm",
+        "--read-only",
         *COMMON_FLAGS,
-        *(['--userns=keep-id'] if not is_root() else []),
+        *(["--userns=keep-id"] if not is_root() else []),
         *sum([["-e", e] for e in envs], []),
-        "--device", "/dev/bus/usb:/dev/bus/usb",
-        "-v", f"{out_dir}:/data:z",
-        RECORDER_IMAGE
+        "--device",
+        "/dev/bus/usb:/dev/bus/usb",
+        "-v",
+        f"{out_dir}:/data:z",
+        RECORDER_IMAGE,
     ]
     logging.info(f"Running recorder: {' '.join(cmd)}")
 
@@ -49,7 +56,9 @@ def run_recorder(sat_conf: Satellite, stop_after: float, out_dir: str) -> str:
     try:
         process.wait(timeout=stop_after * 60)
     except subprocess.TimeoutExpired:
-        logging.info(f"Recorder process exceeded timeout of {stop_after} minutes. Terminating...")
+        logging.info(
+            f"Recorder process exceeded timeout of {stop_after} minutes. Terminating..."
+        )
         process.terminate()
         try:
             process.wait(timeout=15)
@@ -61,6 +70,7 @@ def run_recorder(sat_conf: Satellite, stop_after: float, out_dir: str) -> str:
     if not os.path.isfile(out_file):
         raise FileNotFoundError("Recorder did not produce recording.bin")
     return out_file
+
 
 def run_decoder(sat_conf: Satellite, decoder: Decoder, pass_dir: str):
     """
@@ -80,7 +90,7 @@ def run_decoder(sat_conf: Satellite, decoder: Decoder, pass_dir: str):
 
     envs: List[str] = [
         "INPUT_FILE=/data/recording.bin",
-        f"OUTPUT_DIR=/output",
+        "OUTPUT_DIR=/output",
         f"FREQUENCY={sat_conf['frequency']}",
         f"BANDWIDTH={sat_conf['bandwidth']}",
         f"SAMP_RATE={sat_conf['sample_rate']}",
@@ -90,15 +100,20 @@ def run_decoder(sat_conf: Satellite, decoder: Decoder, pass_dir: str):
         envs.append(f"{k}={v}")
 
     cmd: List[str] = [
-        "podman", "run", "--rm", "--read-only",
+        "podman",
+        "run",
+        "--rm",
+        "--read-only",
         *COMMON_FLAGS,
-        *(['--userns=keep-id'] if not is_root() else []),
+        *(["--userns=keep-id"] if not is_root() else []),
         *sum([["-e", e] for e in envs], []),
         *shlex.split(decoder.get("podman_args", "")),
-        "-v", f"{pass_dir}:/data:z",
-        "-v", f"{pass_out_dir}:/output:z",
+        "-v",
+        f"{pass_dir}:/data:z",
+        "-v",
+        f"{pass_out_dir}:/output:z",
         decoder["container"],
-        *shlex.split(decoder.get("args", ""))
+        *shlex.split(decoder.get("args", "")),
     ]
 
     logging.info(f"Running decoder: {' '.join(cmd)}")
