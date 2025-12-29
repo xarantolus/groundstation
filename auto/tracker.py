@@ -47,9 +47,12 @@ console = Console()
 log_handler = LogBufferHandler(capacity=50)
 log_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s", datefmt="%H:%M:%S"))
 
+file_handler = logging.FileHandler("tracker.log")
+file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+
 logging.basicConfig(
     level=logging.INFO,
-    handlers=[log_handler, RichHandler(console=console, rich_tracebacks=True)]
+    handlers=[log_handler, file_handler, RichHandler(console=console, rich_tracebacks=True)]
 )
 logger = logging.getLogger("groundstation")
 
