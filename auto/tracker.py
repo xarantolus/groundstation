@@ -587,7 +587,7 @@ class Orchestrator:
                     # So we should avoid logger.info() because that goes to primary TUI log.
                     # We can log to the file handler specifically.
                     record = logging.LogRecord(
-                        "decoder", logging.INFO, None, None, line, None, None
+                        "decoder", logging.INFO, __file__, 0, line, (), None
                     )
                     file_handler.emit(record)
 
