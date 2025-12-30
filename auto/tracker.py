@@ -503,9 +503,11 @@ class Orchestrator:
             def recorder_log(line: str):
                 logger.info(f"Recorder: {line}")
 
+            record_time = pass_info["end_time"] - datetime.datetime.now()
+
             run_recorder(
                 sat,
-                pass_info["duration_minutes"] + 1,
+                (record_time.total_seconds() / 60) + 1,
                 tmp_dir,
                 log_callback=recorder_log,
             )
