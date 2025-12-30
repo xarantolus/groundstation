@@ -480,7 +480,7 @@ class Orchestrator:
                     ).total_seconds() - 30
                     if wait_time > 0:
                         logger.info(
-                            f"Waiting for {sat['name']} (starts in {wait_time / 60:.1f}m)"
+                            f"Waiting for {sat['name']} (starts in {wait_time / 60:.1f}m @ {pass_info['start_time'].strftime('%H:%M')})"
                         )
                         chunk = 5
                         while wait_time > 0:
