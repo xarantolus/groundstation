@@ -19,12 +19,18 @@ COMMON_FLAGS = [
 
 def is_root() -> bool:
     import platform
+
     if platform.system() == "Windows":
-        return False # podman on windows usually isn't "root" in the same way
+        return False  # podman on windows usually isn't "root" in the same way
     return os.getuid() == 0
 
 
-def run_recorder(sat_conf: Satellite, stop_after: float, out_dir: str, log_callback: Optional[Callable[[str], None]] = None) -> str:
+def run_recorder(
+    sat_conf: Satellite,
+    stop_after: float,
+    out_dir: str,
+    log_callback: Optional[Callable[[str], None]] = None,
+) -> str:
     """
     Runs a podman container to record the pass. Returns path to output file.
 
@@ -57,7 +63,9 @@ def run_recorder(sat_conf: Satellite, stop_after: float, out_dir: str, log_callb
     logging.info(f"Running recorder: {' '.join(cmd)}")
 
     # Start the process with pipes for stdout/stderr
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False)
+    process = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False
+    )
 
     def reader_thread(pipe, prefix=""):
         try:
@@ -68,7 +76,9 @@ def run_recorder(sat_conf: Satellite, stop_after: float, out_dir: str, log_callb
             logging.debug(f"Reader thread error: {e}")
 
     t1 = threading.Thread(target=reader_thread, args=(process.stdout,), daemon=True)
-    t2 = threading.Thread(target=reader_thread, args=(process.stderr, "ERR: "), daemon=True)
+    t2 = threading.Thread(
+        target=reader_thread, args=(process.stderr, "ERR: "), daemon=True
+    )
     t1.start()
     t2.start()
 
@@ -91,7 +101,12 @@ def run_recorder(sat_conf: Satellite, stop_after: float, out_dir: str, log_callb
     return out_file
 
 
-def run_decoder(sat_conf: Satellite, decoder: Decoder, pass_dir: str, log_callback: Optional[Callable[[str], None]] = None):
+def run_decoder(
+    sat_conf: Satellite,
+    decoder: Decoder,
+    pass_dir: str,
+    log_callback: Optional[Callable[[str], None]] = None,
+):
     """
     Runs a podman container to decode the recording.
     Returns a list of absolute paths to new files created by the decoder.
@@ -138,7 +153,9 @@ def run_decoder(sat_conf: Satellite, decoder: Decoder, pass_dir: str, log_callba
 
     logging.info(f"Running decoder: {' '.join(cmd)}")
 
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False)
+    process = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False
+    )
 
     def reader_thread(pipe, prefix=""):
         try:
@@ -149,7 +166,9 @@ def run_decoder(sat_conf: Satellite, decoder: Decoder, pass_dir: str, log_callba
             logging.debug(f"Reader thread error: {e}")
 
     t1 = threading.Thread(target=reader_thread, args=(process.stdout,), daemon=True)
-    t2 = threading.Thread(target=reader_thread, args=(process.stderr, "ERR: "), daemon=True)
+    t2 = threading.Thread(
+        target=reader_thread, args=(process.stderr, "ERR: "), daemon=True
+    )
     t1.start()
     t2.start()
 

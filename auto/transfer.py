@@ -3,7 +3,6 @@ import logging
 import os
 import pickle
 import queue
-import shutil
 import subprocess
 import threading
 import time
@@ -122,7 +121,7 @@ class TransferQueueManager:
                     "progress": (current / total) * 100,
                 }
             else:
-                 self.active_transfers[source_path] = {
+                self.active_transfers[source_path] = {
                     "current": current,
                     "total": total,
                     "progress": 0,

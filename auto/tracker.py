@@ -9,19 +9,17 @@ import datetime
 import requests
 import logging
 import collections
-from typing import List, Tuple, Dict, Any, Union, Optional, Callable
+from typing import List, Tuple, Dict, Any, Optional
 
 # Rich UI imports
 from rich.live import Live
 from rich.layout import Layout
 from rich.panel import Panel
 from rich.table import Table
-from rich.progress import Progress, BarColumn, TextColumn, TaskProgressColumn, DownloadColumn, TransferSpeedColumn, TimeRemainingColumn
 from rich.logging import RichHandler
-from rich.console import Console, Group, RenderableType, ConsoleOptions, RenderResult
-from rich.status import Status
+from rich.console import Console, Group, ConsoleOptions, RenderResult
 
-from common import Decoder, Satellite, PassInfo, IQ_DATA_FILE_EXTENSION
+from common import Satellite, PassInfo, IQ_DATA_FILE_EXTENSION
 from config import load_config
 from external import run_recorder, run_decoder
 from transfer import TransferQueueManager, file_transfer_worker
@@ -29,8 +27,10 @@ from transfer import TransferQueueManager, file_transfer_worker
 # Constants
 QUEUE_STATE_FILE = "transfer_queue.state"
 
+
 class LogBufferHandler(logging.Handler):
     """A logging handler that keeps the last N log messages in a buffer."""
+
     def __init__(self, capacity: int = 100):
         super().__init__()
         self.buffer = collections.deque(maxlen=capacity)
@@ -42,17 +42,26 @@ class LogBufferHandler(logging.Handler):
         except Exception:
             self.handleError(record)
 
+
 # Configure logging
 console = Console()
 log_handler = LogBufferHandler(capacity=50)
-log_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s", datefmt="%H:%M:%S"))
+log_handler.setFormatter(
+    logging.Formatter("%(asctime)s - %(message)s", datefmt="%H:%M:%S")
+)
 
 file_handler = logging.FileHandler("tracker.log")
-file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+file_handler.setFormatter(
+    logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+)
 
 logging.basicConfig(
     level=logging.INFO,
-    handlers=[log_handler, file_handler, RichHandler(console=console, rich_tracebacks=True)]
+    handlers=[
+        log_handler,
+        file_handler,
+        RichHandler(console=console, rich_tracebacks=True),
+    ],
 )
 logger = logging.getLogger("groundstation")
 
@@ -113,7 +122,9 @@ class PassManager:
                     logger.error(f"Failed to fetch TLE for {norad} from N2YO: {ex}")
                     raise RuntimeError(f"Could not fetch TLE for {norad}") from ex
             else:
-                raise RuntimeError(f"Failed to fetch TLE for {norad} from Celestrak and no N2YO API key") from e
+                raise RuntimeError(
+                    f"Failed to fetch TLE for {norad} from Celestrak and no N2YO API key"
+                ) from e
 
         lines = [line.strip() for line in tle_text.splitlines() if line.strip()]
         if len(lines) >= 3:
@@ -136,6 +147,7 @@ class PassManager:
     ) -> List[PassInfo]:
         """Calculates passes for a single satellite over the next few hours."""
         import ephem
+
         tle1, tle2 = self.fetch_tle(sat["norad"])
 
         passes = []
@@ -187,8 +199,12 @@ class PassManager:
                         crossing_time_descending = check_time
                         break
 
-                start_time = crossing_time_ascending if crossing_time_ascending else rise_time
-                end_time = crossing_time_descending if crossing_time_descending else set_time
+                start_time = (
+                    crossing_time_ascending if crossing_time_ascending else rise_time
+                )
+                end_time = (
+                    crossing_time_descending if crossing_time_descending else set_time
+                )
 
                 observer.date = start_time
                 satellite.compute(observer)
@@ -205,20 +221,22 @@ class PassManager:
                 end_elevation_deg = float(satellite.alt) * 180 / ephem.pi
                 end_azimuth_deg = float(satellite.az) * 180 / ephem.pi
 
-                passes.append({
-                    "start_time": ephem.localtime(start_time),
-                    "max_time": ephem.localtime(max_time),
-                    "end_time": ephem.localtime(end_time),
-                    "start_elevation": start_elevation_deg,
-                    "max_elevation": max_elevation_deg,
-                    "end_elevation": end_elevation_deg,
-                    "start_azimuth": start_azimuth_deg,
-                    "max_azimuth": max_azimuth_deg,
-                    "end_azimuth": end_azimuth_deg,
-                    "duration_minutes": (end_time - start_time) * 24 * 60,
-                    "tle1": tle1,
-                    "tle2": tle2,
-                })
+                passes.append(
+                    {
+                        "start_time": ephem.localtime(start_time),
+                        "max_time": ephem.localtime(max_time),
+                        "end_time": ephem.localtime(end_time),
+                        "start_elevation": start_elevation_deg,
+                        "max_elevation": max_elevation_deg,
+                        "end_elevation": end_elevation_deg,
+                        "start_azimuth": start_azimuth_deg,
+                        "max_azimuth": max_azimuth_deg,
+                        "end_azimuth": end_azimuth_deg,
+                        "duration_minutes": (end_time - start_time) * 24 * 60,
+                        "tle1": tle1,
+                        "tle2": tle2,
+                    }
+                )
             except Exception as e:
                 logger.error(f"Error calculating pass: {e}")
                 current_date += ephem.minute
@@ -237,7 +255,9 @@ class PassManager:
         all_passes = []
         for sat in sats:
             try:
-                passes = self.get_satellite_passes(sat, geo, threshold, pass_start_threshold, hours)
+                passes = self.get_satellite_passes(
+                    sat, geo, threshold, pass_start_threshold, hours
+                )
                 all_passes.extend([(sat, p) for p in passes])
             except Exception as e:
                 logger.error(f"Error predicting for {sat['name']}: {e}")
@@ -245,7 +265,9 @@ class PassManager:
         all_passes.sort(key=lambda x: x[1]["start_time"])
         return self.prioritize(all_passes)
 
-    def prioritize(self, next_passes: List[Tuple[Satellite, PassInfo]]) -> List[Tuple[Satellite, PassInfo]]:
+    def prioritize(
+        self, next_passes: List[Tuple[Satellite, PassInfo]]
+    ) -> List[Tuple[Satellite, PassInfo]]:
         """Handles overlapping passes based on priority and elevation."""
         prioritized_passes = []
         current_index = 0
@@ -255,28 +277,47 @@ class PassManager:
             overlapping_passes = []
             for i in range(current_index, len(next_passes)):
                 other_sat, other_pass = next_passes[i]
-                if (other_pass["start_time"] < current_pass["end_time"] and
-                    other_pass["end_time"] > current_pass["start_time"]):
+                if (
+                    other_pass["start_time"] < current_pass["end_time"]
+                    and other_pass["end_time"] > current_pass["start_time"]
+                ):
                     overlapping_passes.append((i, other_sat, other_pass))
 
             if overlapping_passes:
-                priority_candidates = [p for p in overlapping_passes if p[1].get("priority") is not None]
+                priority_candidates = [
+                    p for p in overlapping_passes if p[1].get("priority") is not None
+                ]
                 if priority_candidates:
-                    highest_priority = max(p[1]["priority"] for p in priority_candidates)
-                    highest_priority_group = [p for p in priority_candidates if p[1]["priority"] == highest_priority]
+                    highest_priority = max(
+                        p[1]["priority"] for p in priority_candidates
+                    )
+                    highest_priority_group = [
+                        p
+                        for p in priority_candidates
+                        if p[1]["priority"] == highest_priority
+                    ]
                     if len(highest_priority_group) > 1:
-                        best_idx, best_sat, best_pass = max(highest_priority_group, key=lambda x: x[2]["max_elevation"])
+                        best_idx, best_sat, best_pass = max(
+                            highest_priority_group, key=lambda x: x[2]["max_elevation"]
+                        )
                     else:
                         best_idx, best_sat, best_pass = highest_priority_group[0]
                 else:
-                    best_idx, best_sat, best_pass = max(overlapping_passes, key=lambda x: x[2]["max_elevation"])
+                    best_idx, best_sat, best_pass = max(
+                        overlapping_passes, key=lambda x: x[2]["max_elevation"]
+                    )
 
                 if len(overlapping_passes) > 1:
-                    logger.info(f"Overlap detected: {len(overlapping_passes)} passes. Selected {best_sat['name']}.")
+                    logger.info(
+                        f"Overlap detected: {len(overlapping_passes)} passes. Selected {best_sat['name']}."
+                    )
 
                 prioritized_passes.append((best_sat, best_pass))
                 next_overlap_end = max(p[2]["end_time"] for p in overlapping_passes)
-                while current_index < len(next_passes) and next_passes[current_index][1]["start_time"] <= next_overlap_end:
+                while (
+                    current_index < len(next_passes)
+                    and next_passes[current_index][1]["start_time"] <= next_overlap_end
+                ):
                     current_index += 1
             else:
                 prioritized_passes.append((current_sat, current_pass))
@@ -297,17 +338,12 @@ class RichTUI:
         self._setup_layout()
 
     def _setup_layout(self):
-        self.layout.split(
-            Layout(name="top", size=15),
-            Layout(name="bottom")
-        )
+        self.layout.split(Layout(name="top", size=15), Layout(name="bottom"))
         self.layout["top"].split_row(
-            Layout(name="passes", ratio=2),
-            Layout(name="transfers", ratio=1)
+            Layout(name="passes", ratio=2), Layout(name="transfers", ratio=1)
         )
         self.layout["bottom"].split_row(
-            Layout(name="main_log"),
-            Layout(name="decoder_log", visible=False)
+            Layout(name="main_log"), Layout(name="decoder_log", visible=False)
         )
 
     def update_passes(self, passes: List[Tuple[Satellite, PassInfo]]):
@@ -335,7 +371,7 @@ class RichTUI:
                 start_str,
                 f"{p['duration_minutes']:.1f}m",
                 f"{p['max_elevation']:.1f}°",
-                f"{azimuth_degrees_to_direction(p['start_azimuth'])}->{azimuth_degrees_to_direction(p['max_azimuth'])}->{azimuth_degrees_to_direction(p['end_azimuth'])}"
+                f"{azimuth_degrees_to_direction(p['start_azimuth'])}->{azimuth_degrees_to_direction(p['max_azimuth'])}->{azimuth_degrees_to_direction(p['end_azimuth'])}",
             )
         return table
 
@@ -358,9 +394,13 @@ class RichTUI:
         return Panel("\n".join(list(log_handler.buffer)), title="Log")
 
     def _generate_decoder_log_panel(self) -> Panel:
-        return Panel("\n".join(list(self.decoder_logs)), title="Decoder Log", border_style="cyan")
+        return Panel(
+            "\n".join(list(self.decoder_logs)), title="Decoder Log", border_style="cyan"
+        )
 
-    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+    def __rich_console__(
+        self, console: Console, options: ConsoleOptions
+    ) -> RenderResult:
         yield self.__call__()
 
     def __call__(self) -> Layout:
@@ -385,7 +425,9 @@ class Orchestrator:
         self.sats = self.cfg["satellites"]
         self.geo = self.cfg["location"]
         self.threshold = self.cfg.get("pass_elevation_threshold_deg", 5.0)
-        self.pass_start_threshold = self.cfg.get("pass_start_elevation_threshold_deg", 5.0)
+        self.pass_start_threshold = self.cfg.get(
+            "pass_start_elevation_threshold_deg", 5.0
+        )
         self.update_interval_hours = self.cfg.get("update_interval_hours", 8)
         self.nas_dir = self.cfg["nas_directory"]
         os.makedirs(self.nas_dir, exist_ok=True)
@@ -399,20 +441,25 @@ class Orchestrator:
 
     def start(self):
         """Starts the orchestrator."""
-        threading.Thread(target=file_transfer_worker, daemon=True, args=(self.transfer_manager,)).start()
+        threading.Thread(
+            target=file_transfer_worker, daemon=True, args=(self.transfer_manager,)
+        ).start()
         threading.Thread(target=self.decode_worker, daemon=True).start()
 
         with Live(self.tui, console=console, screen=True, refresh_per_second=4):
             while True:
                 logger.info("Updating pass predictions...")
                 next_passes = self.pass_manager.predict_all(
-                    self.sats, self.geo, self.threshold, self.pass_start_threshold,
-                    hours=int(1.25 * self.update_interval_hours)
+                    self.sats,
+                    self.geo,
+                    self.threshold,
+                    self.pass_start_threshold,
+                    hours=int(1.25 * self.update_interval_hours),
                 )
                 self.tui.update_passes(next_passes)
 
                 if not next_passes:
-                    logger.info(f"No passes found. Sleeping for 15m.")
+                    logger.info("No passes found. Sleeping for 15m.")
                     time.sleep(15 * 60)
                     continue
 
@@ -421,14 +468,20 @@ class Orchestrator:
                     if pass_info["end_time"] < now:
                         continue
 
-                    if pass_info["start_time"] > now + datetime.timedelta(hours=self.update_interval_hours):
+                    if pass_info["start_time"] > now + datetime.timedelta(
+                        hours=self.update_interval_hours
+                    ):
                         break
 
                     self.next_overpass = pass_info
 
-                    wait_time = (pass_info["start_time"] - datetime.datetime.now()).total_seconds() - 30
+                    wait_time = (
+                        pass_info["start_time"] - datetime.datetime.now()
+                    ).total_seconds() - 30
                     if wait_time > 0:
-                        logger.info(f"Waiting for {sat['name']} (starts in {wait_time/60:.1f}m)")
+                        logger.info(
+                            f"Waiting for {sat['name']} (starts in {wait_time / 60:.1f}m)"
+                        )
                         chunk = 5
                         while wait_time > 0:
                             time.sleep(min(chunk, wait_time))
@@ -436,19 +489,26 @@ class Orchestrator:
 
                     self.record_pass(sat, pass_info)
 
-                logger.info(f"Cycle complete. Waiting 10s...")
+                logger.info("Cycle complete. Waiting 10s...")
                 time.sleep(10)
 
     def record_pass(self, sat: Satellite, pass_info: PassInfo):
         """Handles the recording of a satellite pass."""
-        logger.info(f"Starting pass for {sat['name']} (Max Elev: {pass_info['max_elevation']:.1f}°)")
+        logger.info(
+            f"Starting pass for {sat['name']} (Max Elev: {pass_info['max_elevation']:.1f}°)"
+        )
         try:
             tmp_dir = tempfile.mkdtemp(prefix="recorder")
 
             def recorder_log(line: str):
                 logger.info(f"Recorder: {line}")
 
-            run_recorder(sat, pass_info["duration_minutes"] + 1, tmp_dir, log_callback=recorder_log)
+            run_recorder(
+                sat,
+                pass_info["duration_minutes"] + 1,
+                tmp_dir,
+                log_callback=recorder_log,
+            )
 
             pass_info_file = os.path.join(tmp_dir, "info.json")
             with open(pass_info_file, "w") as f:
@@ -479,11 +539,15 @@ class Orchestrator:
             for file in files:
                 src = os.path.join(root, file)
                 rel = os.path.relpath(root, source_dir)
-                dst = os.path.join(dst_prefix, file if rel == "." else os.path.join(rel, file))
+                dst = os.path.join(
+                    dst_prefix, file if rel == "." else os.path.join(rel, file)
+                )
 
                 if sat.get("skip_iq_upload") and file.endswith(IQ_DATA_FILE_EXTENSION):
-                    try: os.remove(src)
-                    except: pass
+                    try:
+                        os.remove(src)
+                    except Exception:
+                        pass
                     continue
 
                 self.transfer_manager.add_item(src, dst, 0)
@@ -498,9 +562,15 @@ class Orchestrator:
                 pass_dir, pass_info, sat = self.decode_queue.get()
 
                 while True:
-                    time_to_next = (self.next_overpass["start_time"] - datetime.datetime.now()).total_seconds() if self.next_overpass else 999
+                    time_to_next = (
+                        (
+                            self.next_overpass["start_time"] - datetime.datetime.now()
+                        ).total_seconds()
+                        if self.next_overpass
+                        else 999
+                    )
                     if 0 < time_to_next < 300:
-                        logger.info(f"Decoder: Next pass soon, waiting...")
+                        logger.info("Decoder: Next pass soon, waiting...")
                         time.sleep(time_to_next + 60)
                     else:
                         break
@@ -516,10 +586,16 @@ class Orchestrator:
                     # Actually user said "decoder output should only be shown in the log file and in a second log window"
                     # So we should avoid logger.info() because that goes to primary TUI log.
                     # We can log to the file handler specifically.
-                    record = logging.LogRecord("decoder", logging.INFO, None, None, line, None, None)
+                    record = logging.LogRecord(
+                        "decoder", logging.INFO, None, None, line, None, None
+                    )
                     file_handler.emit(record)
 
-                decoders = sat["decoder"] if isinstance(sat["decoder"], list) else [sat["decoder"]]
+                decoders = (
+                    sat["decoder"]
+                    if isinstance(sat["decoder"], list)
+                    else [sat["decoder"]]
+                )
                 for decoder in decoders:
                     try:
                         run_decoder(sat, decoder, pass_dir, log_callback=decoder_log)
@@ -536,10 +612,13 @@ class Orchestrator:
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("-c", "--config", default="config.yml", help="Path to YAML config file")
+    p.add_argument(
+        "-c", "--config", default="config.yml", help="Path to YAML config file"
+    )
     args = p.parse_args()
 
     from dotenv import load_dotenv
+
     load_dotenv()
 
     orch = Orchestrator(args.config)
