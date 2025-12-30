@@ -115,11 +115,13 @@ class TransferQueueManager:
         """Update progress for an active transfer"""
         with self._lock:
             if total > 0:
+                progress = (current / total) * 100
                 self.active_transfers[source_path] = {
                     "current": current,
                     "total": total,
-                    "progress": (current / total) * 100,
+                    "progress": progress,
                 }
+
             else:
                 self.active_transfers[source_path] = {
                     "current": current,
@@ -139,7 +141,7 @@ class TransferQueueManager:
 
 
 def copy_with_progress(
-    src: str, dst: str, manager: TransferQueueManager, buffer_size: int = 1024 * 1024
+    src: str, dst: str, manager: TransferQueueManager, buffer_size: int = 32 * 1024
 ) -> None:
     """Copies a file while reporting progress to the manager"""
     total_size = os.path.getsize(src)

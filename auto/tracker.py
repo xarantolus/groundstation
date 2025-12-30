@@ -435,9 +435,16 @@ class Orchestrator:
         self.pass_manager = PassManager(n2yo_api_key=os.getenv("N2YO_API_KEY"))
         self.transfer_manager = TransferQueueManager(QUEUE_STATE_FILE)
         self.tui = RichTUI(self.transfer_manager)
+        # Set up progress callback to trigger UI updates immediately
+        self.transfer_manager.on_progress_update = self._trigger_ui_update
 
         self.decode_queue = queue.Queue()
         self.next_overpass: Optional[PassInfo] = None
+        self._ui_update_needed = threading.Event()
+
+    def _trigger_ui_update(self) -> None:
+        """Trigger an immediate UI update when progress changes"""
+        self._ui_update_needed.set()
 
     def start(self):
         """Starts the orchestrator."""
