@@ -9,6 +9,7 @@ import datetime
 import requests
 import logging
 import collections
+import signal
 from typing import List, Tuple, Dict, Any, Optional
 
 # Rich UI imports
@@ -453,7 +454,15 @@ class Orchestrator:
         ).start()
         threading.Thread(target=self.decode_worker, daemon=True).start()
 
-        with Live(self.tui, console=console, screen=True, refresh_per_second=4):
+        def handle_resize(sig, frame):
+            self._trigger_ui_update()
+
+        try:
+            signal.signal(signal.SIGWINCH, handle_resize)
+        except (AttributeError, ValueError):
+            pass
+
+        with Live(self.tui, console=console, screen=True, refresh_per_second=10):
             while True:
                 logger.info("Updating pass predictions...")
                 next_passes = self.pass_manager.predict_all(
@@ -463,6 +472,11 @@ class Orchestrator:
                     self.pass_start_threshold,
                     hours=int(1.25 * self.update_interval_hours),
                 )
+
+                # Filter out passes that have already ended
+                now = datetime.datetime.now()
+                next_passes = [(sat, p) for sat, p in next_passes if p["end_time"] > now]
+
                 self.tui.update_passes(next_passes)
 
                 if not next_passes:
