@@ -3,7 +3,7 @@ import os
 import shlex
 import asyncio
 import shutil
-from typing import List, Callable, Optional, Awaitable
+from typing import List, Callable, Optional
 from common import Decoder, Satellite
 
 RECORDER_IMAGE = "ghcr.io/xarantolus/groundstation/satellite-recorder:latest"
@@ -112,9 +112,9 @@ async def run_recorder(
             asyncio.gather(
                 _read_stream(process.stdout, log_callback),
                 _read_stream(process.stderr, log_callback, "ERR: "),
-                process.wait()
+                process.wait(),
             ),
-            timeout=stop_after * 60
+            timeout=stop_after * 60,
         )
     except asyncio.TimeoutError:
         logging.info(
@@ -128,7 +128,7 @@ async def run_recorder(
             try:
                 process.kill()
             except ProcessLookupError:
-                pass # Process already dead
+                pass  # Process already dead
 
     out_file: str = os.path.join(out_dir, "recording.bin")
     if not os.path.isfile(out_file):
@@ -192,11 +192,23 @@ async def run_decoder(
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
 
-    await asyncio.gather(
-        _read_stream(process.stdout, log_callback),
-        _read_stream(process.stderr, log_callback, "ERR: "),
-        process.wait()
-    )
+    try:
+        await asyncio.gather(
+            _read_stream(process.stdout, log_callback),
+            _read_stream(process.stderr, log_callback, "ERR: "),
+            process.wait(),
+        )
+    except asyncio.CancelledError:
+        logging.warning("Decoder process cancelled. Terminating...")
+        try:
+            process.terminate()
+            await asyncio.wait_for(process.wait(), timeout=5)
+        except Exception:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+        raise  # Re-raise to ensure cancellation propagates
 
     # Count how many files were created, recursively
     files = []
@@ -208,4 +220,3 @@ async def run_decoder(
 
     if dec_name and (len(files) < decoder.get("min_files", 1)):
         shutil.rmtree(pass_out_dir)
-

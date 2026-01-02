@@ -3,9 +3,7 @@ import logging
 import os
 import pickle
 import asyncio
-import shutil
 import time
-import subprocess
 
 from common import IQ_DATA_FILE_EXTENSION
 
@@ -209,9 +207,16 @@ async def compress_file(source_path: str) -> str:
     logging.info(f"Compressing {source_path}...")
 
     proc = await asyncio.create_subprocess_exec(
-        "zstd", "--no-progress", "-9", "-f", "-v", source_path, "-o", compressed_path,
+        "zstd",
+        "--no-progress",
+        "-9",
+        "-f",
+        "-v",
+        source_path,
+        "-o",
+        compressed_path,
         stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE
+        stderr=asyncio.subprocess.PIPE,
     )
     await proc.communicate()
 
@@ -283,16 +288,18 @@ async def file_transfer_worker(transfer_queue: TransferQueueManager):
                         copy_with_progress,
                         source_path,
                         destination_path,
-                        transfer_queue
+                        transfer_queue,
                     )
-                    break # Success
+                    break  # Success
                 except Exception as e:
                     if copy_attempt < max_retries - 1:
                         wait_time = 10 * (copy_attempt + 1)
-                        logging.warning(f"Copy failed ({e}). Retrying in {wait_time}s...")
+                        logging.warning(
+                            f"Copy failed ({e}). Retrying in {wait_time}s..."
+                        )
                         await asyncio.sleep(wait_time)
                     else:
-                        raise e # Re-raise after last attempt
+                        raise e  # Re-raise after last attempt
 
             # After copy, remove source
             os.remove(source_path)
@@ -336,7 +343,9 @@ async def file_transfer_worker(transfer_queue: TransferQueueManager):
                 # Let's keep it but maybe increase delay.
 
                 new_attempt = (source_path, destination_path, attempt_nr + 1)
-                await transfer_queue.remove_item((original_source_path, original_destination_path, attempt_nr))
+                await transfer_queue.remove_item(
+                    (original_source_path, original_destination_path, attempt_nr)
+                )
                 await transfer_queue.add_item(*new_attempt)
 
                 logging.info(
@@ -347,7 +356,9 @@ async def file_transfer_worker(transfer_queue: TransferQueueManager):
                 logging.error(
                     f"Failed to transfer file after multiple attempts: {os.path.basename(destination_path)}"
                 )
-                await transfer_queue.remove_item((original_source_path, original_destination_path, attempt_nr))
+                await transfer_queue.remove_item(
+                    (original_source_path, original_destination_path, attempt_nr)
+                )
 
                 # Delete the file if transfer fails
                 try:
@@ -367,7 +378,8 @@ async def file_transfer_worker(transfer_queue: TransferQueueManager):
                 # stick to sync for simplicity on cleanup
 
                 def remove_empty_dirs(directory: str) -> None:
-                    if not os.path.exists(directory): return
+                    if not os.path.exists(directory):
+                        return
                     for item in os.listdir(directory):
                         item_path = os.path.join(directory, item)
                         if os.path.isdir(item_path):

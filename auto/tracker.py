@@ -1,15 +1,13 @@
 import json
 import os
 import asyncio
-import threading
-import time
 import tempfile
+import pickle
 import argparse
 import datetime
 import requests
 import logging
 import collections
-import signal
 from typing import List, Tuple, Dict, Any, Optional
 
 # Rich UI imports
@@ -422,6 +420,63 @@ class RichTUI:
         return self.layout
 
 
+class DecodeQueueManager:
+    """
+    Manages the decode queue with persistent state tracking.
+    Async implementation.
+    """
+
+    def __init__(self, state_file_path: str = "decode_queue.state"):
+        self.state_file_path = state_file_path
+        self._queue: asyncio.Queue[Tuple[str, Dict, Dict]] = asyncio.Queue()
+        self._items: List[Tuple[str, Dict, Dict]] = []  # Internal tracking
+        self._lock = asyncio.Lock()
+        self._load_state()
+
+    async def add_item(self, pass_dir: str, pass_info: Dict, sat: Dict) -> bool:
+        item = (pass_dir, pass_info, sat)
+        async with self._lock:
+            await self._queue.put(item)
+            # Check for duplicates? Assuming unique pass_dir
+            if item not in self._items:
+                self._items.append(item)
+                self._save_state()
+        logging.debug(f"Added to decode queue: {pass_dir}")
+        return True
+
+    async def get_next_item(self) -> Tuple[str, Dict, Dict]:
+        return await self._queue.get()
+
+    def task_done(self) -> None:
+        self._queue.task_done()
+
+    async def remove_item(self, item: Tuple[str, Dict, Dict]) -> bool:
+        async with self._lock:
+            if item in self._items:
+                self._items.remove(item)
+                self._save_state()
+                return True
+        return False
+
+    def _save_state(self) -> None:
+        try:
+            with open(self.state_file_path, "wb") as f:
+                pickle.dump(self._items, f)
+        except Exception as e:
+            logging.error(f"Failed to save decode queue state: {e}")
+
+    def _load_state(self) -> None:
+        try:
+            if os.path.exists(self.state_file_path):
+                with open(self.state_file_path, "rb") as f:
+                    self._items = pickle.load(f)
+                for item in self._items:
+                    self._queue.put_nowait(item)
+                logging.info(f"Loaded decode queue state: {len(self._items)} items")
+        except Exception as e:
+            logging.error(f"Failed to load decode queue state: {e}")
+
+
 class Orchestrator:
     """Coordinates the overall operation of the groundstation."""
 
@@ -439,18 +494,22 @@ class Orchestrator:
 
         self.pass_manager = PassManager(n2yo_api_key=os.getenv("N2YO_API_KEY"))
         self.transfer_manager = TransferQueueManager(QUEUE_STATE_FILE)
+        self.decode_manager = DecodeQueueManager("decode_queue.state")
         self.tui = RichTUI(self.transfer_manager)
 
         # Async queues will be initialized in start() to ensure loop binding
         self.record_queue: Optional[asyncio.Queue] = None
-        self.decode_queue: Optional[asyncio.Queue] = None
+        # self.decode_queue is now managed by self.decode_manager
 
         self.next_overpass: Optional[PassInfo] = None
+
+        # Track active decoder task to allow cancellation
+        # self.current_decode_task: Optional[asyncio.Task] = None
 
     async def start(self):
         """Starts the orchestrator async."""
         self.record_queue = asyncio.Queue()
-        self.decode_queue = asyncio.Queue()
+        # Decode queue loaded from state
 
         # Start workers
         asyncio.create_task(file_transfer_worker(self.transfer_manager))
@@ -470,7 +529,7 @@ class Orchestrator:
                 self.geo,
                 self.threshold,
                 self.pass_start_threshold,
-                int(1.25 * self.update_interval_hours)
+                int(1.25 * self.update_interval_hours),
             )
 
             # Filter out passes that have already ended
@@ -524,9 +583,13 @@ class Orchestrator:
                         wait_time -= chunk
                         iterations += 1
                         if iterations % 60 == 0:  # Log every 5 minutes
-                            logger.debug(f"Still waiting... {wait_time / 60:.1f}m remaining")
+                            logger.debug(
+                                f"Still waiting... {wait_time / 60:.1f}m remaining"
+                            )
 
-                logger.info(f"Wait complete. Starting recording at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                logger.info(
+                    f"Wait complete. Starting recording at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                )
                 await self.record_pass(sat, pass_info)
 
             logger.info("Cycle complete. Waiting 10s...")
@@ -567,16 +630,22 @@ class Orchestrator:
             try:
                 sat, pass_info, tmp_dir = await self.record_queue.get()
 
+                # Removed active decoder termination logic as requested
+
                 logger.info(f"Recording worker: Starting {sat['name']}")
 
                 def recorder_log(line: str):
                     logger.info(f"Recorder: {line}")
 
                 # Recalculate recording time in case there was a delay
-                record_minutes = (pass_info["end_time"] - datetime.datetime.now()).total_seconds() / 60
+                record_minutes = (
+                    pass_info["end_time"] - datetime.datetime.now()
+                ).total_seconds() / 60
 
                 if record_minutes < 0.5:
-                    logger.warning(f"Pass for {sat['name']} already ended. Skipping recording.")
+                    logger.warning(
+                        f"Pass for {sat['name']} already ended. Skipping recording."
+                    )
                     self.record_queue.task_done()
                     continue
 
@@ -596,7 +665,7 @@ class Orchestrator:
                         json.dump({"satellite": sat, "info": p_copy}, f, indent=4)
 
                     if sat.get("decoder"):
-                        await self.decode_queue.put((tmp_dir, pass_info, sat))
+                        await self.decode_manager.add_item(tmp_dir, pass_info, sat)
                         logger.info(f"Queued decoding for {sat['name']}")
                     else:
                         await self.stage_for_transfer(tmp_dir, pass_info, sat)
@@ -607,7 +676,9 @@ class Orchestrator:
             except Exception as e:
                 logger.error(f"Record worker error: {e}")
 
-    async def stage_for_transfer(self, source_dir: str, pass_info: PassInfo, sat: Satellite):
+    async def stage_for_transfer(
+        self, source_dir: str, pass_info: PassInfo, sat: Satellite
+    ):
         """Stages files for transfer to NAS."""
         dst_prefix = os.path.join(
             self.nas_dir,
@@ -638,31 +709,40 @@ class Orchestrator:
         logger.info(f"Queued {queued_count} files for transfer for {sat['name']}")
 
     async def decode_worker(self):
-        """Processes decoding tasks sequentially."""
+        """Processes decoding tasks sequentially with smart scheduling."""
         while True:
             try:
-                pass_dir, pass_info, sat = await self.decode_queue.get()
+                item = await self.decode_manager.get_next_item()
+                pass_dir, pass_info, sat = item
 
+                # Smart Scheduling: Wait for SAFE window (15 mins free time)
                 while True:
                     now = datetime.datetime.now()
-                    time_to_next = 999
-                    pass_in_progress = False
+                    wait_seconds = 0
 
                     if self.next_overpass:
-                        if now < self.next_overpass["start_time"]:
-                            time_to_next = (self.next_overpass["start_time"] - now).total_seconds()
-                        elif now < self.next_overpass["end_time"]:
-                            pass_in_progress = True
+                        start_time = self.next_overpass["start_time"]
+                        end_time = self.next_overpass["end_time"]
 
-                    if pass_in_progress:
-                        wait_until_end = (self.next_overpass["end_time"] - now).total_seconds()
-                        logger.info(f"Decoder: Pass in progress, waiting {wait_until_end + 60:.0f}s...")
-                        await asyncio.sleep(wait_until_end + 60)
-                    elif 0 < time_to_next < 300:
-                        logger.info(f"Decoder: Next pass soon ({time_to_next:.0f}s), waiting...")
-                        await asyncio.sleep(time_to_next + 60)
+                        if now < start_time:
+                            time_to_next = (start_time - now).total_seconds()
+                            if time_to_next < 15 * 60:
+                                # Less than 15 mins to next pass. Wait until pass ends.
+                                wait_seconds = (end_time - now).total_seconds() + 60
+                                logger.info(
+                                    f"Decoder: Upcoming pass in {time_to_next / 60:.1f}m. Waiting {wait_seconds / 60:.1f}m until pass ends."
+                                )
+                        elif now < end_time:
+                            # Pass in progress. Wait until end.
+                            wait_seconds = (end_time - now).total_seconds() + 60
+                            logger.info(
+                                f"Decoder: Pass in progress. Waiting {wait_seconds / 60:.1f}m."
+                            )
+
+                    if wait_seconds > 0:
+                        await asyncio.sleep(wait_seconds)
                     else:
-                        break
+                        break  # Safe to decode
 
                 logger.info(f"Starting decoding for {sat['name']}")
                 self.tui.is_decoding = True
@@ -680,17 +760,23 @@ class Orchestrator:
                     if isinstance(sat["decoder"], list)
                     else [sat["decoder"]]
                 )
+
                 for decoder in decoders:
                     try:
-                        await run_decoder(sat, decoder, pass_dir, log_callback=decoder_log)
+                        await run_decoder(
+                            sat, decoder, pass_dir, log_callback=decoder_log
+                        )
                     except Exception as e:
                         logger.error(f"Decoder error for {sat['name']}: {e}")
 
                 self.tui.is_decoding = False
                 await self.stage_for_transfer(pass_dir, pass_info, sat)
-                self.decode_queue.task_done()
+
+                # Remove from persistent queue only after success/attempt
+                await self.decode_manager.remove_item(item)
+                self.decode_manager.task_done()
             except Exception as e:
-                logger.error(f"Decode worker error: {e}")
+                logger.error(f"Decode worker loop error: {e}")
                 self.tui.is_decoding = False
 
 
