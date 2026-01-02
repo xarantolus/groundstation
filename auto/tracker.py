@@ -439,6 +439,7 @@ class Orchestrator:
         # Set up progress callback to trigger UI updates immediately
         self.transfer_manager.on_progress_update = self._trigger_ui_update
 
+        self.record_queue = queue.Queue()
         self.decode_queue = queue.Queue()
         self.next_overpass: Optional[PassInfo] = None
         self._ui_update_needed = threading.Event()
@@ -452,6 +453,7 @@ class Orchestrator:
         threading.Thread(
             target=file_transfer_worker, daemon=True, args=(self.transfer_manager,)
         ).start()
+        threading.Thread(target=self.record_worker, daemon=True).start()
         threading.Thread(target=self.decode_worker, daemon=True).start()
 
         def handle_resize(sig, frame):
@@ -533,7 +535,7 @@ class Orchestrator:
                 time.sleep(10)
 
     def record_pass(self, sat: Satellite, pass_info: PassInfo):
-        """Handles the recording of a satellite pass."""
+        """Queues a satellite pass for recording."""
         now = datetime.datetime.now()
 
         # Check if pass has already ended
@@ -555,35 +557,57 @@ class Orchestrator:
             return
 
         logger.info(
-            f"Starting pass for {sat['name']} (Max Elev: {pass_info['max_elevation']:.1f}°, Recording for {record_minutes:.1f}m)"
+            f"Queueing pass for {sat['name']} (Max Elev: {pass_info['max_elevation']:.1f}°, Recording for {record_minutes:.1f}m)"
         )
-        try:
-            tmp_dir = tempfile.mkdtemp(prefix="recorder")
 
-            def recorder_log(line: str):
-                logger.info(f"Recorder: {line}")
+        tmp_dir = tempfile.mkdtemp(prefix="recorder")
+        self.record_queue.put((sat, pass_info, tmp_dir))
 
-            run_recorder(
-                sat,
-                record_minutes + 1,  # Add 1 minute buffer
-                tmp_dir,
-                log_callback=recorder_log,
-            )
+    def record_worker(self):
+        """Processes recording tasks asynchronously."""
+        while True:
+            try:
+                sat, pass_info, tmp_dir = self.record_queue.get()
 
-            pass_info_file = os.path.join(tmp_dir, "info.json")
-            with open(pass_info_file, "w") as f:
-                p_copy = pass_info.copy()
-                for k in ["start_time", "max_time", "end_time"]:
-                    p_copy[k] = p_copy[k].isoformat()
-                json.dump({"satellite": sat, "info": p_copy}, f, indent=4)
+                logger.info(f"Recording worker: Starting {sat['name']}")
 
-            if sat.get("decoder"):
-                self.decode_queue.put((tmp_dir, pass_info, sat))
-                logger.info(f"Queued decoding for {sat['name']}")
-            else:
-                self.stage_for_transfer(tmp_dir, pass_info, sat)
-        except Exception as e:
-            logger.error(f"Error during pass for {sat['name']}: {e}")
+                def recorder_log(line: str):
+                    logger.info(f"Recorder: {line}")
+
+                # Recalculate recording time in case there was a delay
+                record_minutes = (pass_info["end_time"] - datetime.datetime.now()).total_seconds() / 60
+
+                if record_minutes < 0.5:
+                    logger.warning(f"Pass for {sat['name']} already ended. Skipping recording.")
+                    self.record_queue.task_done()
+                    continue
+
+                try:
+                    run_recorder(
+                        sat,
+                        record_minutes + 1,  # Add 1 minute buffer
+                        tmp_dir,
+                        log_callback=recorder_log,
+                    )
+
+                    pass_info_file = os.path.join(tmp_dir, "info.json")
+                    with open(pass_info_file, "w") as f:
+                        p_copy = pass_info.copy()
+                        for k in ["start_time", "max_time", "end_time"]:
+                            p_copy[k] = p_copy[k].isoformat()
+                        json.dump({"satellite": sat, "info": p_copy}, f, indent=4)
+
+                    if sat.get("decoder"):
+                        self.decode_queue.put((tmp_dir, pass_info, sat))
+                        logger.info(f"Queued decoding for {sat['name']}")
+                    else:
+                        self.stage_for_transfer(tmp_dir, pass_info, sat)
+                except Exception as e:
+                    logger.error(f"Recording error for {sat['name']}: {e}")
+
+                self.record_queue.task_done()
+            except Exception as e:
+                logger.error(f"Record worker error: {e}")
 
     def stage_for_transfer(self, source_dir: str, pass_info: PassInfo, sat: Satellite):
         """Stages files for transfer to NAS."""
