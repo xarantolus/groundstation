@@ -1,6 +1,6 @@
 import json
 import os
-import queue
+import asyncio
 import threading
 import time
 import tempfile
@@ -368,6 +368,7 @@ class RichTUI:
         for sat, p in visible_passes[:10]:
             start_str = p["start_time"].strftime("%H:%M:%S")
             if p["start_time"] < now < p["end_time"]:
+                # Bold green if pass is currently live
                 start_str = f"[bold green]{start_str} (LIVE)[/bold green]"
 
             table.add_row(
@@ -439,105 +440,99 @@ class Orchestrator:
         self.pass_manager = PassManager(n2yo_api_key=os.getenv("N2YO_API_KEY"))
         self.transfer_manager = TransferQueueManager(QUEUE_STATE_FILE)
         self.tui = RichTUI(self.transfer_manager)
-        # Set up progress callback to trigger UI updates immediately
-        self.transfer_manager.on_progress_update = self._trigger_ui_update
 
-        self.record_queue = queue.Queue()
-        self.decode_queue = queue.Queue()
+        # Async queues will be initialized in start() to ensure loop binding
+        self.record_queue: Optional[asyncio.Queue] = None
+        self.decode_queue: Optional[asyncio.Queue] = None
+
         self.next_overpass: Optional[PassInfo] = None
-        self._ui_update_needed = threading.Event()
 
-    def _trigger_ui_update(self) -> None:
-        """Trigger an immediate UI update when progress changes"""
-        self._ui_update_needed.set()
+    async def start(self):
+        """Starts the orchestrator async."""
+        self.record_queue = asyncio.Queue()
+        self.decode_queue = asyncio.Queue()
 
-    def start(self):
-        """Starts the orchestrator."""
-        threading.Thread(
-            target=file_transfer_worker, daemon=True, args=(self.transfer_manager,)
-        ).start()
-        threading.Thread(target=self.record_worker, daemon=True).start()
-        threading.Thread(target=self.decode_worker, daemon=True).start()
+        # Start workers
+        asyncio.create_task(file_transfer_worker(self.transfer_manager))
+        asyncio.create_task(self.record_worker())
+        asyncio.create_task(self.decode_worker())
 
-        def handle_resize(sig, frame):
-            self._trigger_ui_update()
+        loop = asyncio.get_running_loop()
 
-        try:
-            signal.signal(signal.SIGWINCH, handle_resize)
-        except (AttributeError, ValueError):
-            pass
+        while True:
+            logger.info("Updating pass predictions...")
 
-        with Live(self.tui, console=console, screen=True, refresh_per_second=10):
-            while True:
-                logger.info("Updating pass predictions...")
-                next_passes = self.pass_manager.predict_all(
-                    self.sats,
-                    self.geo,
-                    self.threshold,
-                    self.pass_start_threshold,
-                    hours=int(1.25 * self.update_interval_hours),
-                )
+            # Run prediction in executor as it is CPU/network bound
+            next_passes = await loop.run_in_executor(
+                None,
+                self.pass_manager.predict_all,
+                self.sats,
+                self.geo,
+                self.threshold,
+                self.pass_start_threshold,
+                int(1.25 * self.update_interval_hours)
+            )
 
-                # Filter out passes that have already ended
+            # Filter out passes that have already ended
+            now = datetime.datetime.now()
+            next_passes = [(sat, p) for sat, p in next_passes if p["end_time"] > now]
+
+            self.tui.update_passes(next_passes)
+
+            if not next_passes:
+                logger.info("No passes found. Sleeping for 15m.")
+                await asyncio.sleep(15 * 60)
+                continue
+
+            for i, (sat, pass_info) in enumerate(next_passes):
                 now = datetime.datetime.now()
-                next_passes = [(sat, p) for sat, p in next_passes if p["end_time"] > now]
-
-                self.tui.update_passes(next_passes)
-
-                if not next_passes:
-                    logger.info("No passes found. Sleeping for 15m.")
-                    time.sleep(15 * 60)
+                if pass_info["end_time"] < now:
                     continue
 
-                for i, (sat, pass_info) in enumerate(next_passes):
-                    now = datetime.datetime.now()
-                    if pass_info["end_time"] < now:
-                        continue
+                if pass_info["start_time"] > now + datetime.timedelta(
+                    hours=self.update_interval_hours
+                ):
+                    break
 
-                    if pass_info["start_time"] > now + datetime.timedelta(
-                        hours=self.update_interval_hours
-                    ):
-                        break
+                self.next_overpass = pass_info
 
-                    self.next_overpass = pass_info
+                now = datetime.datetime.now()
+                wait_time = (pass_info["start_time"] - now).total_seconds() - 30
 
-                    now = datetime.datetime.now()
-                    wait_time = (pass_info["start_time"] - now).total_seconds() - 30
+                logger.info(
+                    f"Pass timing - Current: {now.strftime('%Y-%m-%d %H:%M:%S')}, "
+                    f"Start: {pass_info['start_time'].strftime('%Y-%m-%d %H:%M:%S')}, "
+                    f"Wait: {wait_time:.1f}s ({wait_time / 60:.1f}m)"
+                )
 
-                    logger.info(
-                        f"Pass timing - Current: {now.strftime('%Y-%m-%d %H:%M:%S')}, "
-                        f"Start: {pass_info['start_time'].strftime('%Y-%m-%d %H:%M:%S')}, "
-                        f"Wait: {wait_time:.1f}s ({wait_time / 60:.1f}m)"
+                # Skip if pass has already started (more than 60 seconds ago)
+                if wait_time < -60:
+                    logger.warning(
+                        f"Pass for {sat['name']} already started {abs(wait_time):.0f}s ago. Skipping."
                     )
+                    continue
 
-                    # Skip if pass has already started (more than 60 seconds ago)
-                    if wait_time < -60:
-                        logger.warning(
-                            f"Pass for {sat['name']} already started {abs(wait_time):.0f}s ago. Skipping."
-                        )
-                        continue
+                if wait_time > 0:
+                    logger.info(
+                        f"Waiting for {sat['name']} (starts in {wait_time / 60:.1f}m @ {pass_info['start_time'].strftime('%H:%M')})"
+                    )
+                    chunk = 5
+                    iterations = 0
+                    while wait_time > 0:
+                        sleep_duration = min(chunk, wait_time)
+                        await asyncio.sleep(sleep_duration)
+                        wait_time -= chunk
+                        iterations += 1
+                        if iterations % 60 == 0:  # Log every 5 minutes
+                            logger.debug(f"Still waiting... {wait_time / 60:.1f}m remaining")
 
-                    if wait_time > 0:
-                        logger.info(
-                            f"Waiting for {sat['name']} (starts in {wait_time / 60:.1f}m @ {pass_info['start_time'].strftime('%H:%M')})"
-                        )
-                        chunk = 5
-                        iterations = 0
-                        while wait_time > 0:
-                            sleep_duration = min(chunk, wait_time)
-                            time.sleep(sleep_duration)
-                            wait_time -= chunk
-                            iterations += 1
-                            if iterations % 60 == 0:  # Log every 5 minutes
-                                logger.debug(f"Still waiting... {wait_time / 60:.1f}m remaining")
+                logger.info(f"Wait complete. Starting recording at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                await self.record_pass(sat, pass_info)
 
-                    logger.info(f"Wait complete. Starting recording at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-                    self.record_pass(sat, pass_info)
+            logger.info("Cycle complete. Waiting 10s...")
+            await asyncio.sleep(10)
 
-                logger.info("Cycle complete. Waiting 10s...")
-                time.sleep(10)
-
-    def record_pass(self, sat: Satellite, pass_info: PassInfo):
+    async def record_pass(self, sat: Satellite, pass_info: PassInfo):
         """Queues a satellite pass for recording."""
         now = datetime.datetime.now()
 
@@ -564,13 +559,13 @@ class Orchestrator:
         )
 
         tmp_dir = tempfile.mkdtemp(prefix="recorder")
-        self.record_queue.put((sat, pass_info, tmp_dir))
+        await self.record_queue.put((sat, pass_info, tmp_dir))
 
-    def record_worker(self):
+    async def record_worker(self):
         """Processes recording tasks asynchronously."""
         while True:
             try:
-                sat, pass_info, tmp_dir = self.record_queue.get()
+                sat, pass_info, tmp_dir = await self.record_queue.get()
 
                 logger.info(f"Recording worker: Starting {sat['name']}")
 
@@ -586,7 +581,7 @@ class Orchestrator:
                     continue
 
                 try:
-                    run_recorder(
+                    await run_recorder(
                         sat,
                         record_minutes + 1,  # Add 1 minute buffer
                         tmp_dir,
@@ -601,10 +596,10 @@ class Orchestrator:
                         json.dump({"satellite": sat, "info": p_copy}, f, indent=4)
 
                     if sat.get("decoder"):
-                        self.decode_queue.put((tmp_dir, pass_info, sat))
+                        await self.decode_queue.put((tmp_dir, pass_info, sat))
                         logger.info(f"Queued decoding for {sat['name']}")
                     else:
-                        self.stage_for_transfer(tmp_dir, pass_info, sat)
+                        await self.stage_for_transfer(tmp_dir, pass_info, sat)
                 except Exception as e:
                     logger.error(f"Recording error for {sat['name']}: {e}")
 
@@ -612,7 +607,7 @@ class Orchestrator:
             except Exception as e:
                 logger.error(f"Record worker error: {e}")
 
-    def stage_for_transfer(self, source_dir: str, pass_info: PassInfo, sat: Satellite):
+    async def stage_for_transfer(self, source_dir: str, pass_info: PassInfo, sat: Satellite):
         """Stages files for transfer to NAS."""
         dst_prefix = os.path.join(
             self.nas_dir,
@@ -637,16 +632,16 @@ class Orchestrator:
                         pass
                     continue
 
-                self.transfer_manager.add_item(src, dst, 0)
+                await self.transfer_manager.add_item(src, dst, 0)
                 queued_count += 1
 
         logger.info(f"Queued {queued_count} files for transfer for {sat['name']}")
 
-    def decode_worker(self):
+    async def decode_worker(self):
         """Processes decoding tasks sequentially."""
         while True:
             try:
-                pass_dir, pass_info, sat = self.decode_queue.get()
+                pass_dir, pass_info, sat = await self.decode_queue.get()
 
                 while True:
                     now = datetime.datetime.now()
@@ -662,10 +657,10 @@ class Orchestrator:
                     if pass_in_progress:
                         wait_until_end = (self.next_overpass["end_time"] - now).total_seconds()
                         logger.info(f"Decoder: Pass in progress, waiting {wait_until_end + 60:.0f}s...")
-                        time.sleep(wait_until_end + 60)
+                        await asyncio.sleep(wait_until_end + 60)
                     elif 0 < time_to_next < 300:
                         logger.info(f"Decoder: Next pass soon ({time_to_next:.0f}s), waiting...")
-                        time.sleep(time_to_next + 60)
+                        await asyncio.sleep(time_to_next + 60)
                     else:
                         break
 
@@ -675,11 +670,6 @@ class Orchestrator:
 
                 def decoder_log(line: str):
                     self.tui.add_decoder_log(line)
-                    # Also write to log file, but not to the TUI main log panel
-                    # We can use the logger's file handler directly or just logger.info and filter it?
-                    # Actually user said "decoder output should only be shown in the log file and in a second log window"
-                    # So we should avoid logger.info() because that goes to primary TUI log.
-                    # We can log to the file handler specifically.
                     record = logging.LogRecord(
                         "decoder", logging.INFO, __file__, 0, line, (), None
                     )
@@ -692,12 +682,12 @@ class Orchestrator:
                 )
                 for decoder in decoders:
                     try:
-                        run_decoder(sat, decoder, pass_dir, log_callback=decoder_log)
+                        await run_decoder(sat, decoder, pass_dir, log_callback=decoder_log)
                     except Exception as e:
                         logger.error(f"Decoder error for {sat['name']}: {e}")
 
                 self.tui.is_decoding = False
-                self.stage_for_transfer(pass_dir, pass_info, sat)
+                await self.stage_for_transfer(pass_dir, pass_info, sat)
                 self.decode_queue.task_done()
             except Exception as e:
                 logger.error(f"Decode worker error: {e}")
@@ -717,7 +707,8 @@ def main():
 
     orch = Orchestrator(args.config)
     try:
-        orch.start()
+        with Live(orch.tui, console=console, screen=True, refresh_per_second=10):
+            asyncio.run(orch.start())
     except KeyboardInterrupt:
         logger.info("Shutting down...")
 

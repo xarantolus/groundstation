@@ -1,3 +1,4 @@
+*.log
 recordings
 *.png
 flowgraphs/*.py

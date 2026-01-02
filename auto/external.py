@@ -1,11 +1,9 @@
 import logging
 import os
-import subprocess
 import shlex
-import threading
-import io
+import asyncio
 import shutil
-from typing import List, Callable, Optional
+from typing import List, Callable, Optional, Awaitable
 from common import Decoder, Satellite
 
 RECORDER_IMAGE = "ghcr.io/xarantolus/groundstation/satellite-recorder:latest"
@@ -25,7 +23,50 @@ def is_root() -> bool:
     return os.getuid() == 0
 
 
-def run_recorder(
+async def _read_stream(
+    stream: asyncio.StreamReader,
+    callback: Optional[Callable[[str], None]] = None,
+    prefix: str = "",
+):
+    """
+    Reads from a stream and calls the callback for every line.
+    Handles \r as a newline to support progress bars.
+    """
+    if not callback:
+        return
+
+    buffer = bytearray()
+    while True:
+        try:
+            # excessive logic to support \r (e.g. for progress bars) as regex newline
+            chunk = await stream.read(1024)
+            if not chunk:
+                break
+
+            # Process chunk byte by byte to handle \r and \n correctly
+            for byte in chunk:
+                if byte == 10:  # \n
+                    line = buffer.decode("utf-8", errors="replace")
+                    callback(f"{prefix}{line}")
+                    buffer.clear()
+                elif byte == 13:  # \r
+                    line = buffer.decode("utf-8", errors="replace")
+                    callback(f"{prefix}{line}")
+                    buffer.clear()
+                else:
+                    buffer.append(byte)
+
+        except Exception as e:
+            logging.error(f"Stream reader error: {e}")
+            break
+
+    # Flush remaining buffer
+    if buffer:
+        line = buffer.decode("utf-8", errors="replace")
+        callback(f"{prefix}{line}")
+
+
+async def run_recorder(
     sat_conf: Satellite,
     stop_after: float,
     out_dir: str,
@@ -62,38 +103,32 @@ def run_recorder(
     ]
     logging.info(f"Running recorder: {' '.join(cmd)}")
 
-    # Start the process with pipes for stdout/stderr
-    process = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False
+    process = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
-
-    def reader_thread(pipe, prefix=""):
-        try:
-            for line in io.TextIOWrapper(pipe, encoding="utf-8", errors="replace"):
-                if log_callback:
-                    log_callback(f"{prefix}{line.strip()}")
-        except Exception as e:
-            logging.debug(f"Reader thread error: {e}")
-
-    t1 = threading.Thread(target=reader_thread, args=(process.stdout,), daemon=True)
-    t2 = threading.Thread(
-        target=reader_thread, args=(process.stderr, "ERR: "), daemon=True
-    )
-    t1.start()
-    t2.start()
 
     try:
-        process.wait(timeout=stop_after * 60)
-    except subprocess.TimeoutExpired:
+        await asyncio.wait_for(
+            asyncio.gather(
+                _read_stream(process.stdout, log_callback),
+                _read_stream(process.stderr, log_callback, "ERR: "),
+                process.wait()
+            ),
+            timeout=stop_after * 60
+        )
+    except asyncio.TimeoutError:
         logging.info(
             f"Recorder process exceeded timeout of {stop_after} minutes. Terminating..."
         )
-        process.terminate()
         try:
-            process.wait(timeout=15)
-        except subprocess.TimeoutExpired:
+            process.terminate()
+            await asyncio.wait_for(process.wait(), timeout=15)
+        except Exception:
             logging.error("Recorder process didn't terminate properly. Killing...")
-            process.kill()
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass # Process already dead
 
     out_file: str = os.path.join(out_dir, "recording.bin")
     if not os.path.isfile(out_file):
@@ -101,7 +136,7 @@ def run_recorder(
     return out_file
 
 
-def run_decoder(
+async def run_decoder(
     sat_conf: Satellite,
     decoder: Decoder,
     pass_dir: str,
@@ -153,26 +188,15 @@ def run_decoder(
 
     logging.info(f"Running decoder: {' '.join(cmd)}")
 
-    process = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False
+    process = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
 
-    def reader_thread(pipe, prefix=""):
-        try:
-            for line in io.TextIOWrapper(pipe, encoding="utf-8", errors="replace"):
-                if log_callback:
-                    log_callback(f"{prefix}{line.strip()}")
-        except Exception as e:
-            logging.debug(f"Reader thread error: {e}")
-
-    t1 = threading.Thread(target=reader_thread, args=(process.stdout,), daemon=True)
-    t2 = threading.Thread(
-        target=reader_thread, args=(process.stderr, "ERR: "), daemon=True
+    await asyncio.gather(
+        _read_stream(process.stdout, log_callback),
+        _read_stream(process.stderr, log_callback, "ERR: "),
+        process.wait()
     )
-    t1.start()
-    t2.start()
-
-    process.wait()
 
     # Count how many files were created, recursively
     files = []
@@ -184,3 +208,4 @@ def run_decoder(
 
     if dec_name and (len(files) < decoder.get("min_files", 1)):
         shutil.rmtree(pass_out_dir)
+
