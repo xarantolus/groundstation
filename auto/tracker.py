@@ -362,7 +362,10 @@ class RichTUI:
         table.add_column("Direction")
 
         now = datetime.datetime.now()
-        for sat, p in self.next_passes[:10]:
+        # Filter out passes that have already ended
+        visible_passes = [(s, p) for s, p in self.next_passes if p["end_time"] > now]
+
+        for sat, p in visible_passes[:10]:
             start_str = p["start_time"].strftime("%H:%M:%S")
             if p["start_time"] < now < p["end_time"]:
                 start_str = f"[bold green]{start_str} (LIVE)[/bold green]"
@@ -646,15 +649,22 @@ class Orchestrator:
                 pass_dir, pass_info, sat = self.decode_queue.get()
 
                 while True:
-                    time_to_next = (
-                        (
-                            self.next_overpass["start_time"] - datetime.datetime.now()
-                        ).total_seconds()
-                        if self.next_overpass
-                        else 999
-                    )
-                    if 0 < time_to_next < 300:
-                        logger.info("Decoder: Next pass soon, waiting...")
+                    now = datetime.datetime.now()
+                    time_to_next = 999
+                    pass_in_progress = False
+
+                    if self.next_overpass:
+                        if now < self.next_overpass["start_time"]:
+                            time_to_next = (self.next_overpass["start_time"] - now).total_seconds()
+                        elif now < self.next_overpass["end_time"]:
+                            pass_in_progress = True
+
+                    if pass_in_progress:
+                        wait_until_end = (self.next_overpass["end_time"] - now).total_seconds()
+                        logger.info(f"Decoder: Pass in progress, waiting {wait_until_end + 60:.0f}s...")
+                        time.sleep(wait_until_end + 60)
+                    elif 0 < time_to_next < 300:
+                        logger.info(f"Decoder: Next pass soon ({time_to_next:.0f}s), waiting...")
                         time.sleep(time_to_next + 60)
                     else:
                         break
