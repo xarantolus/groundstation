@@ -496,18 +496,37 @@ class Orchestrator:
 
                     self.next_overpass = pass_info
 
-                    wait_time = (
-                        pass_info["start_time"] - datetime.datetime.now()
-                    ).total_seconds() - 30
+                    now = datetime.datetime.now()
+                    wait_time = (pass_info["start_time"] - now).total_seconds() - 30
+
+                    logger.info(
+                        f"Pass timing - Current: {now.strftime('%Y-%m-%d %H:%M:%S')}, "
+                        f"Start: {pass_info['start_time'].strftime('%Y-%m-%d %H:%M:%S')}, "
+                        f"Wait: {wait_time:.1f}s ({wait_time / 60:.1f}m)"
+                    )
+
+                    # Skip if pass has already started (more than 60 seconds ago)
+                    if wait_time < -60:
+                        logger.warning(
+                            f"Pass for {sat['name']} already started {abs(wait_time):.0f}s ago. Skipping."
+                        )
+                        continue
+
                     if wait_time > 0:
                         logger.info(
                             f"Waiting for {sat['name']} (starts in {wait_time / 60:.1f}m @ {pass_info['start_time'].strftime('%H:%M')})"
                         )
                         chunk = 5
+                        iterations = 0
                         while wait_time > 0:
-                            time.sleep(min(chunk, wait_time))
+                            sleep_duration = min(chunk, wait_time)
+                            time.sleep(sleep_duration)
                             wait_time -= chunk
+                            iterations += 1
+                            if iterations % 60 == 0:  # Log every 5 minutes
+                                logger.debug(f"Still waiting... {wait_time / 60:.1f}m remaining")
 
+                    logger.info(f"Wait complete. Starting recording at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                     self.record_pass(sat, pass_info)
 
                 logger.info("Cycle complete. Waiting 10s...")
@@ -515,8 +534,28 @@ class Orchestrator:
 
     def record_pass(self, sat: Satellite, pass_info: PassInfo):
         """Handles the recording of a satellite pass."""
+        now = datetime.datetime.now()
+
+        # Check if pass has already ended
+        if pass_info["end_time"] <= now:
+            logger.warning(
+                f"Pass for {sat['name']} has already ended at {pass_info['end_time'].strftime('%H:%M:%S')}. Skipping."
+            )
+            return
+
+        # Calculate remaining time for this pass
+        record_time = pass_info["end_time"] - now
+        record_minutes = record_time.total_seconds() / 60
+
+        # Ensure we have at least 1 minute of recording time
+        if record_minutes < 1:
+            logger.warning(
+                f"Pass for {sat['name']} has less than 1 minute remaining ({record_minutes:.1f}m). Skipping."
+            )
+            return
+
         logger.info(
-            f"Starting pass for {sat['name']} (Max Elev: {pass_info['max_elevation']:.1f}°)"
+            f"Starting pass for {sat['name']} (Max Elev: {pass_info['max_elevation']:.1f}°, Recording for {record_minutes:.1f}m)"
         )
         try:
             tmp_dir = tempfile.mkdtemp(prefix="recorder")
@@ -524,11 +563,9 @@ class Orchestrator:
             def recorder_log(line: str):
                 logger.info(f"Recorder: {line}")
 
-            record_time = pass_info["end_time"] - datetime.datetime.now()
-
             run_recorder(
                 sat,
-                (record_time.total_seconds() / 60) + 1,
+                record_minutes + 1,  # Add 1 minute buffer
                 tmp_dir,
                 log_callback=recorder_log,
             )
