@@ -167,26 +167,13 @@ class TransferQueueManager:
 
 
 def copy_with_progress(
-    src: str, dst: str, manager: TransferQueueManager, buffer_size: int = 32 * 1024
+    src: str, dst: str, manager: TransferQueueManager, loop: asyncio.AbstractEventLoop, buffer_size: int = 32 * 1024
 ) -> None:
     """Copies a file while reporting progress to the manager. Runs in thread executor."""
     total_size = os.path.getsize(src)
     copied = 0
 
     os.makedirs(os.path.dirname(dst), exist_ok=True)
-
-    # We need to run the async update_progress from this sync function?
-    # No, this function will be run in executor, so it's a synchronous function.
-    # But manager.update_progress is now async.
-    # We can't call await here easily.
-    # We should use a sync wrapper or call_soon_threadsafe if loop is available.
-
-    # Actually, let's keep copy_with_progress logic inside the async worker using executor for the blocking parts (read/write),
-    # OR since we are inside run_in_executor, we can't await.
-
-    # Option: Pass a thread-safe callback.
-
-    loop = asyncio.get_event_loop()
 
     def report_progress(c, t):
         asyncio.run_coroutine_threadsafe(manager.update_progress(src, c, t), loop)
@@ -289,6 +276,7 @@ async def file_transfer_worker(transfer_queue: TransferQueueManager):
                         source_path,
                         destination_path,
                         transfer_queue,
+                        loop
                     )
                     break  # Success
                 except Exception as e:
