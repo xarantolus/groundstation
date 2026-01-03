@@ -64,6 +64,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger("groundstation")
 
+# Signal handler for terminal resize
+import shutil
+import signal
+try:
+    def resize_handler(signum, frame):
+        console.size = shutil.get_terminal_size()
+    signal.signal(signal.SIGWINCH, resize_handler)
+except AttributeError:
+    pass # Windows specific logic not available for SIGWINCH without special handling
+
 
 def azimuth_degrees_to_direction(azimuth: float) -> str:
     """Converts azimuth in degrees to compass direction."""
