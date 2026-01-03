@@ -77,7 +77,7 @@ class LogTail:
         # render the content to lines, then slice.
 
         # We can create a temporary Text object from markup
-        full_text = Text.from_markup("\n".join(self.buffer))
+        full_text = Text("\n".join(self.buffer))
 
         # Wrap the text to fit the width
         lines = full_text.wrap(console, width=width)
