@@ -15,13 +15,21 @@ TransferItem = Tuple[str, str, int]
 class TransferQueueManager:
     # ...
     def __init__(self, state_file_path: str = "transfer_queue.state"):
-        # ...
+        self.state_file_path = state_file_path
+        self._queue: asyncio.Queue[TransferItem] = asyncio.Queue()
+        self._items: List[TransferItem] = []  # Internal tracking of queue items
+        self._lock = asyncio.Lock()  # For async thread-safety
+
+        # Active transfers for progress reporting: {source_path: {"progress": float, "total": int, "current": int}}
         self.active_transfers: Dict[str, Dict[str, Any]] = {}
         self.completed_transfers = collections.deque(
             maxlen=10
         )  # Track last 10 completed
         self.on_progress_update: Optional[Callable[[], None]] = None
-        # ...
+
+        # Load any previously queued items at startup
+        # Note: _load_state is sync but that's fine for init
+        self._load_state()
 
     def add_completed_transfer(self, filename: str, status: str = "Completed"):
         """Adds a completed transfer to the history"""
@@ -31,9 +39,7 @@ class TransferQueueManager:
         if self.on_progress_update:
             self.on_progress_update()
 
-        # Load any previously queued items at startup
-        # Note: _load_state is sync but that's fine for init
-        self._load_state()
+
 
     async def add_item(
         self, source_path: str, destination_path: str, attempt_nr: int = 0
