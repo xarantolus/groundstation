@@ -23,8 +23,79 @@ from config import load_config
 from external import run_recorder, run_decoder
 from transfer import TransferQueueManager, file_transfer_worker
 
+import shutil
+import signal
+from rich.text import Text
+
 # Constants
 QUEUE_STATE_FILE = "transfer_queue.state"
+
+
+class LogTail:
+    """Renderable that shows the last N lines of a log buffer, handling wrapping."""
+
+    def __init__(self, buffer: collections.deque):
+        self.buffer = buffer
+
+    def __rich_console__(
+        self, console: Console, options: ConsoleOptions
+    ) -> RenderResult:
+        # Get available height/width
+        width = options.max_width or console.width
+        height = options.max_height or console.height
+
+        # Combine buffer into one text object (interpreting markup)
+        # Using Text.from_ansi might be needed if logs have ansi codes,
+        # but User uses standard logging which is plain text mostly.
+        # However, RichTUI uses markup in some places.
+        # Panel default was markup.
+        # Let's try Text.from_markup, assuming logs are safe or intended to be markup.
+        # But logs from external processes might have special chars.
+        # Ideally we escape them or use Text(..., style=...) for plain text.
+        # The user's code previously used "\n".join() inside Panel.
+        # Panel renders markup by default.
+        # Let's stick to safe text for raw logs to avoid injection,
+        # UNLESS the user explicitly wants markup in logs (e.g. progress bars logic?).
+        # "progress things" with \r might be handled by external loop?
+        # Live log streaming in external.py creates simple strings.
+        # Let's use Text() for safety, or Text.from_markup() if we are confident.
+        # Given "bold green" example in passes, maybe logs use it too?
+        # Safe bet: Text.from_markup(..., emoji=False) to allow some styling but safely?
+        # Or just Text(item) for each line.
+
+        # We'll construct a single Text object
+        text = Text()
+        for line in self.buffer:
+            text.append(line + "\n")  # append(Text(line)?)
+            # Text.append(string) assumes the string is raw text by default?
+            # No, append takes string and style.
+            # If we want markup, we interpret it.
+            # Panel("\n".join(buffer)) interpreted markup.
+            # So we should probably support it to maintain behavior.
+
+        # Actually, simpler:
+        # render the content to lines, then slice.
+
+        # We can create a temporary Text object from markup
+        full_text = Text.from_markup("\n".join(self.buffer))
+
+        # Wrap the text to fit the width
+        lines = full_text.wrap(console, width=width)
+
+        # lines is a list of lines (Text objects?) No, `wrap` modifies the text instance?
+        # Text.wrap method splits the text into lines. It returns `Text`?
+        # Actually `wrap` in Rich is complex.
+        # Better strategy: use console.render_lines?
+
+        # Let's trust `Text.wrap`.
+        # Wait, Text.wrap(console, width) returns "A list of lines".
+        # Let's assume it returns a list of things we can yield.
+
+        if len(lines) > height:
+            lines = lines[-height:]
+
+        for line in lines:
+            yield line
 
 
 class LogBufferHandler(logging.Handler):
@@ -44,7 +115,7 @@ class LogBufferHandler(logging.Handler):
 
 # Configure logging
 console = Console()
-log_handler = LogBufferHandler(capacity=50)
+log_handler = LogBufferHandler(capacity=1000)
 log_handler.setFormatter(
     logging.Formatter("%(asctime)s - %(message)s", datefmt="%H:%M:%S")
 )
@@ -65,14 +136,14 @@ logging.basicConfig(
 logger = logging.getLogger("groundstation")
 
 # Signal handler for terminal resize
-import shutil
-import signal
 try:
+
     def resize_handler(signum, frame):
         console.size = shutil.get_terminal_size()
+
     signal.signal(signal.SIGWINCH, resize_handler)
 except AttributeError:
-    pass # Windows specific logic not available for SIGWINCH without special handling
+    pass  # Windows specific logic not available for SIGWINCH without special handling
 
 
 def azimuth_degrees_to_direction(azimuth: float) -> str:
@@ -349,7 +420,7 @@ class RichTUI:
     def _setup_layout(self):
         self.layout.split(Layout(name="top", size=15), Layout(name="bottom"))
         self.layout["top"].split_row(
-            Layout(name="passes", ratio=2), Layout(name="transfers", ratio=1)
+            Layout(name="passes", size=85), Layout(name="transfers")
         )
         self.layout["bottom"].split_row(
             Layout(name="main_log"), Layout(name="decoder_log", visible=False)
@@ -390,25 +461,39 @@ class RichTUI:
 
     def _generate_transfers_panel(self) -> Panel:
         active = self.transfer_manager.active_transfers
-        if not active:
-            return Panel("[dim]No active transfers[/dim]", title="Active Transfers")
 
-        progress_group = []
-        for path, data in active.items():
-            fname = os.path.basename(path)
-            progress_group.append(f"{fname}")
-            prog = data["progress"]
-            bar = "█" * int(prog / 5) + "░" * (20 - int(prog / 5))
-            progress_group.append(f"[{bar}] {prog:>3.0f}%")
+        display_group = []
+        if active:
+            for path, data in active.items():
+                fname = os.path.basename(path)
+                display_group.append(f"{fname}")
+                prog = data["progress"]
+                bar = "█" * int(prog / 5) + "░" * (20 - int(prog / 5))
+                display_group.append(f"[{bar}] {prog:>3.0f}%")
+        else:
+            # Show history if no active transfers
+            display_group.append("[dim]No active transfers[/dim]")
+            if self.transfer_manager.completed_transfers:
+                display_group.append("")
+                display_group.append("[bold]Recent Transfers:[/bold]")
+                # Traverse in reverse to show newest first
+                for item in reversed(self.transfer_manager.completed_transfers):
+                    status_color = "green" if item["status"] == "Completed" else "red"
+                    time_str = datetime.datetime.fromtimestamp(item["time"]).strftime(
+                        "%H:%M:%S"
+                    )
+                    display_group.append(
+                        f"[{status_color}]✓ {item['filename']}[/{status_color}] [dim]({time_str})[/dim]"
+                    )
 
-        return Panel(Group(*progress_group), title="Active Transfers")
+        return Panel(Group(*display_group), title="Transfers")
 
     def _generate_log_panel(self) -> Panel:
-        return Panel("\n".join(list(log_handler.buffer)), title="Log")
+        return Panel(LogTail(log_handler.buffer), title="Log")
 
     def _generate_decoder_log_panel(self) -> Panel:
         return Panel(
-            "\n".join(list(self.decoder_logs)), title="Decoder Log", border_style="cyan"
+            LogTail(self.decoder_logs), title="Decoder Log", border_style="cyan"
         )
 
     def __rich_console__(
@@ -522,7 +607,10 @@ class Orchestrator:
         # Decode queue loaded from state
 
         # Start workers
-        asyncio.create_task(file_transfer_worker(self.transfer_manager))
+        # Spawn 4 concurrent transfer workers
+        for i in range(4):
+            asyncio.create_task(file_transfer_worker(self.transfer_manager))
+
         asyncio.create_task(self.record_worker())
         asyncio.create_task(self.decode_worker())
 

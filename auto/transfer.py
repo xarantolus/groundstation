@@ -1,9 +1,10 @@
-from typing import List, Tuple, Dict, Any, Optional, Callable
+from typing import Tuple, Dict, Any, Optional, Callable
 import logging
 import os
 import pickle
 import asyncio
 import time
+import collections
 
 from common import IQ_DATA_FILE_EXTENSION
 
@@ -12,20 +13,23 @@ TransferItem = Tuple[str, str, int]
 
 
 class TransferQueueManager:
-    """
-    Manages the file transfer queue with persistent state tracking.
-    Async implementation.
-    """
-
+    # ...
     def __init__(self, state_file_path: str = "transfer_queue.state"):
-        self.state_file_path = state_file_path
-        self._queue: asyncio.Queue[TransferItem] = asyncio.Queue()
-        self._items: List[TransferItem] = []  # Internal tracking of queue items
-        self._lock = asyncio.Lock()  # For async thread-safety
-
-        # Active transfers for progress reporting: {source_path: {"progress": float, "total": int, "current": int}}
+        # ...
         self.active_transfers: Dict[str, Dict[str, Any]] = {}
+        self.completed_transfers = collections.deque(
+            maxlen=10
+        )  # Track last 10 completed
         self.on_progress_update: Optional[Callable[[], None]] = None
+        # ...
+
+    def add_completed_transfer(self, filename: str, status: str = "Completed"):
+        """Adds a completed transfer to the history"""
+        self.completed_transfers.append(
+            {"filename": filename, "status": status, "time": time.time()}
+        )
+        if self.on_progress_update:
+            self.on_progress_update()
 
         # Load any previously queued items at startup
         # Note: _load_state is sync but that's fine for init
@@ -167,7 +171,11 @@ class TransferQueueManager:
 
 
 def copy_with_progress(
-    src: str, dst: str, manager: TransferQueueManager, loop: asyncio.AbstractEventLoop, buffer_size: int = 32 * 1024
+    src: str,
+    dst: str,
+    manager: TransferQueueManager,
+    loop: asyncio.AbstractEventLoop,
+    buffer_size: int = 32 * 1024,
 ) -> None:
     """Copies a file while reporting progress to the manager. Runs in thread executor."""
     total_size = os.path.getsize(src)
@@ -276,7 +284,7 @@ async def file_transfer_worker(transfer_queue: TransferQueueManager):
                         source_path,
                         destination_path,
                         transfer_queue,
-                        loop
+                        loop,
                     )
                     break  # Success
                 except Exception as e:
@@ -308,6 +316,7 @@ async def file_transfer_worker(transfer_queue: TransferQueueManager):
             )
 
             # Remove from tracking list once completed
+            transfer_queue.add_completed_transfer(os.path.basename(destination_path))
             await transfer_queue.remove_item(
                 (original_source_path, original_destination_path, attempt_nr)
             )
