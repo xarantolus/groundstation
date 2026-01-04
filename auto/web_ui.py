@@ -36,7 +36,7 @@ class WebServer:
 
     async def start(self):
         """Starts the web server."""
-        self.runner = aiohttp.web.AppRunner(self.app)
+        self.runner = aiohttp.web.AppRunner(self.app, access_log=None)
         await self.runner.setup()
         self.site = aiohttp.web.TCPSite(self.runner, self.host, self.port)
         await self.site.start()
