@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Groundstation Status</title>
+    <style>
+        :root {
+            --bg-color: #121212;
+            --surface-color: #1e1e1e;
+            --surface-highlight: #2c2c2c;
+            --text-primary: #e0e0e0;
+            --text-secondary: #a0a0a0;
+            --accent-color: #00bcd4;
+            --accent-live: #00e676;
+            --border-color: #333;
+            --font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            font-family: var(--font-family);
+            margin: 0;
+            padding: 20px;
+            font-size: 14px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            grid-template-rows: auto 1fr;
+            grid-gap: 20px;
+            height: calc(100vh - 40px);
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto auto auto;
+                height: auto;
+            }
+        }
+
+        .card {
+            background-color: var(--surface-color);
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            padding: 15px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .card-header {
+            font-size: 1.1em;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: var(--accent-color);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 10px;
+        }
+
+        .card-content {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        /* Passes Table */
+        #passes-card {
+            grid-column: 1 / 2;
+            grid-row: 1 / 2;
+            min-height: 250px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 1.1em;
+        }
+
+        th {
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+            padding: 8px;
+            color: var(--text-secondary);
+            font-weight: normal;
+        }
+
+        td {
+            padding: 12px 8px;
+            border-bottom: 1px solid var(--surface-highlight);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .live-pass {
+            color: var(--accent-live);
+            font-weight: bold;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.7; }
+            100% { opacity: 1; }
+        }
+
+        /* Transfers */
+        #transfers-card {
+            grid-column: 2 / 3;
+            grid-row: 1 / 2;
+            min-height: 250px;
+        }
+
+        .transfer-item {
+            padding: 10px;
+            background-color: var(--surface-highlight);
+            margin-bottom: 8px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+
+        .transfer-name {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        .progress-bar {
+            height: 6px;
+            background-color: #444;
+            border-radius: 3px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background-color: var(--accent-color);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .completed-transfer {
+            font-size: 0.9em;
+            color: var(--text-secondary);
+            padding: 4px 0;
+            border-bottom: 1px solid var(--surface-highlight);
+        }
+
+        .status-ok { color: var(--accent-live); }
+        .status-err { color: #f44336; }
+
+        /* Logs */
+        #logs-card {
+            grid-column: 1 / -1;
+            grid-row: 2 / 3;
+            min-height: 300px;
+        }
+
+        .log-entry {
+            font-family: 'Consolas', 'Monaco', monospace;
+            padding: 2px 0;
+            white-space: pre-wrap;
+            word-break: break-all;
+            line-height: 1.4;
+            color: #ccc;
+        }
+
+        .log-time {
+            color: #666;
+            margin-right: 8px;
+            user-select: none;
+        }
+
+        .log-INFO { color: #bdbdbd; }
+        .log-WARNING { color: #ff9800; }
+        .log-ERROR { color: #f44336; }
+        .log-DEBUG { color: #616161; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div id="passes-card" class="card">
+            <div class="card-header">Next Overpasses</div>
+            <div class="card-content" id="passes-content">
+                {{ passes_html | safe }}
+            </div>
+        </div>
+
+        <div id="transfers-card" class="card">
+            <div class="card-header">Transfers</div>
+            <div class="card-content" id="transfers-content">
+                {{ transfers_html | safe }}
+            </div>
+        </div>
+
+        <div id="logs-card" class="card">
+            <div class="card-header">System Log</div>
+            <div class="card-content" id="logs-content">
+                {{ logs_html | safe }}
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+        let socket;
+        let retryInterval = 1000;
+
+        function connect() {
+            socket = new WebSocket(wsUrl);
+
+            socket.onopen = function() {
+                console.log("WebSocket Connected");
+                retryInterval = 1000; // Reset retry interval
+            };
+
+            socket.onmessage = function(event) {
+                const msg = JSON.parse(event.data);
+                if (msg.target === 'passes-content') {
+                    document.getElementById('passes-content').innerHTML = msg.html;
+                } else if (msg.target === 'transfers-content') {
+                    document.getElementById('transfers-content').innerHTML = msg.html;
+                } else if (msg.target === 'logs-content') {
+                    const logsDiv = document.getElementById('logs-content');
+                    // Check if scrolled to bottom
+                    const isAtBottom = logsDiv.scrollHeight - logsDiv.scrollTop <= logsDiv.clientHeight + 50;
+
+                    if (msg.method === 'append') {
+                        // Create a temporary container to parse HTML string into nodes
+                        const temp = document.createElement('div');
+                        temp.innerHTML = msg.html;
+                        while (temp.firstChild) {
+                            logsDiv.appendChild(temp.firstChild);
+                        }
+                    } else {
+                        logsDiv.innerHTML = msg.html;
+                    }
+
+                    // Limit log entries to prevent browser lag (keep last 500)
+                    while (logsDiv.children.length > 500) {
+                        logsDiv.removeChild(logsDiv.firstChild);
+                    }
+
+                    if (isAtBottom) {
+                        logsDiv.scrollTop = logsDiv.scrollHeight;
+                    }
+                }
+            };
+
+            socket.onclose = function(e) {
+                console.log('Socket is closed. Reconnect will be attempted in ' + retryInterval/1000 + ' second.', e.reason);
+                setTimeout(function() {
+                    retryInterval = Math.min(retryInterval * 2, 30000); // Backoff up to 30s
+                    connect();
+                }, retryInterval);
+            };
+
+            socket.onerror = function(err) {
+                console.error('Socket encountered error: ', err.message, 'Closing socket');
+                socket.close();
+            };
+        }
+
+        // Initial scroll to bottom for logs
+        const logsDiv = document.getElementById('logs-content');
+        logsDiv.scrollTop = logsDiv.scrollHeight;
+
+        connect();
+    </script>
+</body>
+</html>

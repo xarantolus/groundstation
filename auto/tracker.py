@@ -22,6 +22,7 @@ from common import Satellite, PassInfo, IQ_DATA_FILE_EXTENSION
 from config import load_config
 from external import run_recorder, run_decoder
 from transfer import TransferQueueManager, file_transfer_worker
+from web_ui import WebServer
 
 import shutil
 import signal
@@ -113,6 +114,24 @@ class LogBufferHandler(logging.Handler):
             self.handleError(record)
 
 
+class WebLogHandler(logging.Handler):
+    def __init__(self, web_server):
+        super().__init__()
+        self.web_server = web_server
+
+    def emit(self, record):
+        try:
+            # We need to schedule this on the loop
+            # BUT logging is synchronous. We must rely on creating a task if there is a running loop.
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(self.web_server.log(record))
+            except RuntimeError:
+                pass # No loop running
+        except Exception:
+            self.handleError(record)
+
+
 # Configure logging
 console = Console()
 log_handler = LogBufferHandler(capacity=1000)
@@ -125,6 +144,7 @@ file_handler.setFormatter(
     logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 )
 
+# Web handler will be added later when orchestrator starts
 logging.basicConfig(
     level=logging.INFO,
     handlers=[
@@ -590,7 +610,9 @@ class Orchestrator:
         self.pass_manager = PassManager(n2yo_api_key=os.getenv("N2YO_API_KEY"))
         self.transfer_manager = TransferQueueManager(QUEUE_STATE_FILE)
         self.decode_manager = DecodeQueueManager("decode_queue.state")
+        self.decode_manager = DecodeQueueManager("decode_queue.state")
         self.tui = RichTUI(self.transfer_manager)
+        self.web_server = WebServer()
 
         # Async queues will be initialized in start() to ensure loop binding
         self.record_queue: Optional[asyncio.Queue] = None
@@ -613,6 +635,11 @@ class Orchestrator:
 
         asyncio.create_task(self.record_worker())
         asyncio.create_task(self.decode_worker())
+        await self.web_server.start()
+
+        # Add web logging handler
+        web_handler = WebLogHandler(self.web_server)
+        logging.getLogger().addHandler(web_handler)
 
         loop = asyncio.get_running_loop()
 
@@ -634,7 +661,15 @@ class Orchestrator:
             now = datetime.datetime.now()
             next_passes = [(sat, p) for sat, p in next_passes if p["end_time"] > now]
 
+            next_passes = [(sat, p) for sat, p in next_passes if p["end_time"] > now]
+
             self.tui.update_passes(next_passes)
+            asyncio.create_task(self.web_server.update_passes(next_passes))
+            # Also update transfers periodically in this loop
+            asyncio.create_task(self.web_server.update_transfers(
+                self.transfer_manager.active_transfers,
+                self.transfer_manager.completed_transfers
+            ))
 
             if not next_passes:
                 logger.info("No passes found. Sleeping for 15m.")
@@ -677,7 +712,13 @@ class Orchestrator:
                     iterations = 0
                     while wait_time > 0:
                         sleep_duration = min(chunk, wait_time)
+                        sleep_duration = min(chunk, wait_time)
                         await asyncio.sleep(sleep_duration)
+                        # Keep web UI updated during wait
+                        asyncio.create_task(self.web_server.update_transfers(
+                            self.transfer_manager.active_transfers,
+                            self.transfer_manager.completed_transfers
+                        ))
                         wait_time -= chunk
                         iterations += 1
                         if iterations % 60 == 0:  # Log every 5 minutes
