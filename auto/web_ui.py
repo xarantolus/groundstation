@@ -95,11 +95,27 @@ class WebServer:
 
         # visible_passes has (sat, pass_info) tuples
         for sat, p in passes:
-             if p["end_time"] > now:
+            if p["end_time"] > now:
                 is_live = p["start_time"] < now < p["end_time"]
-                start_str = p["start_time"].strftime("%H:%M:%S")
+
+                # Timestamp Logic
+                # If pass starts on a different day than today, show full date
+                if p["start_time"].date() != now.date():
+                    start_display = p["start_time"].strftime("%Y-%m-%d %H:%M")
+                else:
+                    start_display = p["start_time"].strftime("%H:%M:%S")
+
+                if is_live:
+                    start_display = f"{start_display} (LIVE)"
+
+                full_time_str = p["start_time"].strftime("%Y-%m-%d %H:%M:%S")
                 start_class = 'class="live-pass"' if is_live else ''
-                start_display = f"{start_str} (LIVE)" if is_live else start_str
+
+                # N2YO Link
+                norad_id = sat.get("norad", "")
+                sat_name_html = sat['name']
+                if norad_id:
+                     sat_name_html = f'<a href="https://www.n2yo.com/satellite/?s={norad_id}" target="_blank" style="color: inherit; text-decoration: none; border-bottom: 1px dotted #ccc;">{sat["name"]}</a>'
 
                 # Directions
                 dirs = [
@@ -111,8 +127,8 @@ class WebServer:
 
                 html_parts.append(f"""
                     <tr>
-                        <td>{sat['name']}</td>
-                        <td {start_class}>{start_display}</td>
+                        <td>{sat_name_html}</td>
+                        <td {start_class} title="{full_time_str}">{start_display}</td>
                         <td>{p['duration_minutes']:.1f}m</td>
                         <td>{p['max_elevation']:.1f}°</td>
                         <td>{dir_str}</td>
