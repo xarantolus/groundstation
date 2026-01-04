@@ -10,7 +10,7 @@ from common import Satellite, PassInfo
 logger = logging.getLogger("groundstation.web")
 
 class WebServer:
-    def __init__(self, host: str = "0.0.0.0", port: int = 8080, template_dir: str = "auto/templates"):
+    def __init__(self, host: str = "0.0.0.0", port: int = 80, template_dir: str = "auto/templates"):
         self.host = host
         self.port = port
         self.app = aiohttp.web.Application()
