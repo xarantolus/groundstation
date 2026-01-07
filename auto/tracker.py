@@ -8,7 +8,7 @@ import datetime
 import requests
 import logging
 import collections
-from typing import List, Tuple, Dict, Any, Optional
+from typing import List, Tuple, Dict, Any, Optional, Callable
 
 # Rich UI imports
 from rich.live import Live
