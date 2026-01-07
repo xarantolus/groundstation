@@ -35,8 +35,8 @@ QUEUE_STATE_FILE = "transfer_queue.state"
 class LogTail:
     """Renderable that shows the last N lines of a log buffer, handling wrapping."""
 
-    def __init__(self, buffer: collections.deque):
-        self.buffer = buffer
+    def __init__(self, get_logs_func: Callable[[], List[str]]):
+        self.get_logs = get_logs_func
 
     def __rich_console__(
         self, console: Console, options: ConsoleOptions
@@ -66,19 +66,18 @@ class LogTail:
 
         # We'll construct a single Text object
         text = Text()
-        for line in self.buffer:
-            text.append(line + "\n")  # append(Text(line)?)
-            # Text.append(string) assumes the string is raw text by default?
-            # No, append takes string and style.
-            # If we want markup, we interpret it.
-            # Panel("\n".join(buffer)) interpreted markup.
-            # So we should probably support it to maintain behavior.
+        # Use Text.from_markup if we want colors, or just Text()
+        # But we simplified below.
+        pass
 
         # Actually, simpler:
         # render the content to lines, then slice.
 
+        # Get safe snapshot
+        buffer = self.get_logs()
+
         # We can create a temporary Text object from markup
-        full_text = Text("\n".join(self.buffer))
+        full_text = Text("\n".join(buffer))
 
         # Wrap the text to fit the width
         lines = full_text.wrap(console, width=width)
@@ -105,13 +104,23 @@ class LogBufferHandler(logging.Handler):
     def __init__(self, capacity: int = 100):
         super().__init__()
         self.buffer = collections.deque(maxlen=capacity)
+        # Deque is not thread-safe for iteration while mutating
+        import threading
+        self._lock = threading.Lock()
 
     def emit(self, record):
         try:
             msg = self.format(record)
-            self.buffer.append(msg)
+            with self._lock:
+                self.buffer.append(msg)
         except Exception:
             self.handleError(record)
+
+    def get_logs(self) -> List[str]:
+        """Returns a safe snapshot of the logs."""
+        with self._lock:
+            return list(self.buffer)
+
 
 
 class WebLogHandler(logging.Handler):
@@ -433,9 +442,15 @@ class RichTUI:
         self.transfer_manager = transfer_manager
         self.next_passes: List[Tuple[Satellite, PassInfo]] = []
         self.decoder_logs = collections.deque(maxlen=20)
+        import threading
+        self.decoder_lock = threading.Lock()
         self.is_decoding = False
         self.layout = Layout()
         self._setup_layout()
+
+    def _get_decoder_logs(self) -> List[str]:
+        with self.decoder_lock:
+            return list(self.decoder_logs)
 
     def _setup_layout(self):
         self.layout.split(Layout(name="top", size=15), Layout(name="bottom"))
@@ -450,7 +465,8 @@ class RichTUI:
         self.next_passes = passes
 
     def add_decoder_log(self, msg: str):
-        self.decoder_logs.append(msg)
+        with self.decoder_lock:
+            self.decoder_logs.append(msg)
 
     def _generate_passes_table(self) -> Table:
         table = Table(title="Next Overpasses", expand=True)
@@ -480,7 +496,13 @@ class RichTUI:
         return table
 
     def _generate_transfers_panel(self) -> Panel:
-        active = self.transfer_manager.active_transfers
+        # Create a snapshot to avoid RuntimeError during iteration
+        # active_transfers matches {path: data}
+        try:
+            active = self.transfer_manager.active_transfers.copy()
+        except Exception:
+            # Fallback if copy fails (extremely rare for dict but possible?)
+            active = {}
 
         display_group = []
         if active:
@@ -509,11 +531,11 @@ class RichTUI:
         return Panel(Group(*display_group), title="Transfers")
 
     def _generate_log_panel(self) -> Panel:
-        return Panel(LogTail(log_handler.buffer), title="Log")
+        return Panel(LogTail(log_handler.get_logs), title="Log")
 
     def _generate_decoder_log_panel(self) -> Panel:
         return Panel(
-            LogTail(self.decoder_logs), title="Decoder Log", border_style="cyan"
+            LogTail(self._get_decoder_logs), title="Decoder Log", border_style="cyan"
         )
 
     def __rich_console__(
@@ -711,7 +733,6 @@ class Orchestrator:
                     chunk = 5
                     iterations = 0
                     while wait_time > 0:
-                        sleep_duration = min(chunk, wait_time)
                         sleep_duration = min(chunk, wait_time)
                         await asyncio.sleep(sleep_duration)
                         # Keep web UI updated during wait
