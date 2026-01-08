@@ -65,6 +65,16 @@ class WebServer:
         await ws.prepare(request)
 
         self.websockets.append(ws)
+
+        # Send current state immediately
+        if self.last_passes_html:
+            await ws.send_json({"target": "passes-content", "html": self.last_passes_html})
+        if self.last_transfers_html:
+            await ws.send_json({"target": "transfers-content", "html": self.last_transfers_html})
+        if self.log_history:
+            await ws.send_json({"target": "logs-content", "html": "".join(self.log_history)})
+
+
         try:
             async for msg in ws:
                 pass  # We primarily send data, not receive
