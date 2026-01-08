@@ -617,6 +617,16 @@ class DecodeQueueManager:
 class Orchestrator:
     """Coordinates the overall operation of the groundstation."""
 
+    async def update_transfers_callback(self):
+        """Callback for transfer manager updates."""
+        try:
+             asyncio.create_task(self.web_server.update_transfers(
+                self.transfer_manager.active_transfers,
+                self.transfer_manager.completed_transfers
+            ))
+        except Exception as e:
+            logger.error(f"Failed to schedule transfer update: {e}")
+
     def __init__(self, config_path: str):
         self.cfg = load_config(config_path)
         self.sats = self.cfg["satellites"]
@@ -631,6 +641,9 @@ class Orchestrator:
 
         self.pass_manager = PassManager(n2yo_api_key=os.getenv("N2YO_API_KEY"))
         self.transfer_manager = TransferQueueManager(QUEUE_STATE_FILE)
+        # Hook up transfer updates
+        self.transfer_manager.on_progress_update = lambda: asyncio.create_task(self.update_transfers_callback())
+
         self.decode_manager = DecodeQueueManager("decode_queue.state")
         self.decode_manager = DecodeQueueManager("decode_queue.state")
         self.tui = RichTUI(self.transfer_manager)
@@ -657,6 +670,7 @@ class Orchestrator:
 
         asyncio.create_task(self.record_worker())
         asyncio.create_task(self.decode_worker())
+        # Transfer updates are now event-driven
         await self.web_server.start()
 
         # Add web logging handler
@@ -666,6 +680,8 @@ class Orchestrator:
         loop = asyncio.get_running_loop()
 
         while True:
+            # Force update pass list at start of loop
+            await self.web_server.update_passes(self.tui.next_passes if hasattr(self.tui, 'next_passes') else [])
             logger.info("Updating pass predictions...")
 
             # Run prediction in executor as it is CPU/network bound
@@ -688,7 +704,8 @@ class Orchestrator:
 
             self.tui.update_passes(next_passes)
             asyncio.create_task(self.web_server.update_passes(next_passes))
-            # Also update transfers periodically in this loop
+
+            # Initial transfer update
             asyncio.create_task(self.web_server.update_transfers(
                 self.transfer_manager.active_transfers,
                 self.transfer_manager.completed_transfers
@@ -731,26 +748,36 @@ class Orchestrator:
                     logger.info(
                         f"Waiting for {sat['name']} (starts in {wait_time / 60:.1f}m @ {pass_info['start_time'].strftime('%H:%M')})"
                     )
-                    chunk = 5
-                    iterations = 0
-                    while wait_time > 0:
-                        sleep_duration = min(chunk, wait_time)
-                        await asyncio.sleep(sleep_duration)
-                        # Keep web UI updated during wait
-                        asyncio.create_task(self.web_server.update_transfers(
-                            self.transfer_manager.active_transfers,
-                            self.transfer_manager.completed_transfers
-                        ))
-                        wait_time -= chunk
-                        iterations += 1
-                        if iterations % 60 == 0:  # Log every 5 minutes
-                            logger.debug(
-                                f"Still waiting... {wait_time / 60:.1f}m remaining"
-                            )
+
+
+                    # 1. Wait for previous pass to end (if applicable)
+                    if i > 0:
+                        prev_sat, prev_pass = next_passes[i-1]
+                        now = datetime.datetime.now()
+                        if prev_pass["end_time"] > now:
+                            time_to_end = (prev_pass["end_time"] - now).total_seconds()
+                            # Only sleep if it ends BEFORE our next pass starts (wait_time constraint)
+                            if time_to_end > 0 and time_to_end < wait_time:
+                                logger.info(f"Checking previous pass end in {time_to_end:.1f}s")
+                                await asyncio.sleep(time_to_end + 1)
+
+                                # Update UI after previous pass ends
+                                await self.web_server.update_passes(next_passes)
+
+                                # Recalculate remaining wait time
+                                wait_time = (pass_info["start_time"] - datetime.datetime.now()).total_seconds() - 30
+
+                    # 2. Wait for current pass start
+                    if wait_time > 0:
+                         await asyncio.sleep(wait_time)
 
                 logger.info(
                     f"Wait complete. Starting recording at {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
                 )
+
+                # Ensure UI shows "LIVE" immediately as we start recording
+                await self.web_server.update_passes(next_passes)
+
                 await self.record_pass(sat, pass_info)
 
             logger.info("Cycle complete. Waiting 10s...")
