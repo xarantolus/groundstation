@@ -94,46 +94,70 @@ class WebServer:
         html_parts = ['<table><thead><tr><th>Satellite</th><th>Start</th><th>Duration</th><th>Max El.</th><th>Direction</th></tr></thead><tbody>']
 
         # visible_passes has (sat, pass_info) tuples
+        # visible_passes has (sat, pass_info) tuples
+
+        # Split into past and future
+        past_passes = []
+        future_passes = []
+
         for sat, p in passes:
-            if p["end_time"] > now:
-                is_live = p["start_time"] < now < p["end_time"]
+            if p["end_time"] <= now:
+                past_passes.append((sat, p))
+            else:
+                future_passes.append((sat, p))
 
-                # Timestamp Logic
-                # If pass starts on a different day than today, show full date
-                if p["start_time"].date() != now.date():
-                    start_display = p["start_time"].strftime("%Y-%m-%d %H:%M")
-                else:
-                    start_display = p["start_time"].strftime("%H:%M:%S")
+        # We only want the *last* past pass (most recent one)
+        # Assuming passes are sorted by start_time
+        display_passes = []
+        if past_passes:
+            display_passes.append(past_passes[-1]) # The one immediately before now
 
-                if is_live:
-                    start_display = f"{start_display} (LIVE)"
+        display_passes.extend(future_passes)
 
-                full_time_str = p["start_time"].strftime("%Y-%m-%d %H:%M:%S")
-                start_class = 'class="live-pass"' if is_live else ''
+        for sat, p in display_passes:
+            is_live = p["start_time"] < now < p["end_time"]
+            is_past = p["end_time"] <= now
 
-                # N2YO Link
-                norad_id = sat.get("norad", "")
-                sat_name_html = sat['name']
-                if norad_id:
-                     sat_name_html = f'<a href="https://www.n2yo.com/satellite/?s={norad_id}" target="_blank" style="color: inherit; text-decoration: none; border-bottom: 1px dotted #ccc;">{sat["name"]}</a>'
+            # Timestamp Logic
+            # If pass starts on a different day than today, show full date
+            if p["start_time"].date() != now.date():
+                start_display = p["start_time"].strftime("%Y-%m-%d %H:%M")
+            else:
+                start_display = p["start_time"].strftime("%H:%M:%S")
 
-                # Directions
-                dirs = [
-                    self._az_to_dir(p['start_azimuth']),
-                    self._az_to_dir(p['max_azimuth']),
-                    self._az_to_dir(p['end_azimuth'])
-                ]
-                dir_str = " -> ".join(dirs)
+            if is_live:
+                start_display = f"{start_display} (LIVE)"
+            elif is_past:
+                 start_display = f"{start_display} (Ended)"
 
-                html_parts.append(f"""
-                    <tr>
-                        <td>{sat_name_html}</td>
-                        <td {start_class} title="{full_time_str}">{start_display}</td>
-                        <td>{p['duration_minutes']:.1f}m</td>
-                        <td>{p['max_elevation']:.1f}°</td>
-                        <td>{dir_str}</td>
-                    </tr>
-                """)
+            full_time_str = p["start_time"].strftime("%Y-%m-%d %H:%M:%S")
+
+            row_style = 'style="opacity: 0.6;"' if is_past else ''
+            start_class = 'class="live-pass"' if is_live else ''
+
+            # N2YO Link
+            norad_id = sat.get("norad", "")
+            sat_name_html = sat['name']
+            if norad_id:
+                    sat_name_html = f'<a href="https://www.n2yo.com/satellite/?s={norad_id}" target="_blank" style="color: inherit; text-decoration: none; border-bottom: 1px dotted #ccc;">{sat["name"]}</a>'
+
+            # Directions
+            dirs = [
+                self._az_to_dir(p['start_azimuth']),
+                self._az_to_dir(p['max_azimuth']),
+                self._az_to_dir(p['end_azimuth'])
+            ]
+            dir_str = " -> ".join(dirs)
+
+            html_parts.append(f"""
+                <tr {row_style}>
+                    <td>{sat_name_html}</td>
+                    <td {start_class} title="{full_time_str}">{start_display}</td>
+                    <td>{p['duration_minutes']:.1f}m</td>
+                    <td>{p['max_elevation']:.1f}°</td>
+                    <td>{dir_str}</td>
+                </tr>
+            """)
 
         html_parts.append('</tbody></table>')
         return "".join(html_parts)

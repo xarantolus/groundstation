@@ -266,7 +266,7 @@ class PassManager:
         observer.elev = geo["alt"] / 1000
         observer.horizon = "0"
 
-        start_date = ephem.now() - ephem.minute * 5
+        start_date = ephem.now() - ephem.minute * 90
         observer.date = start_date
         end_date = start_date + ephem.hour * hours
         satellite = ephem.readtle(sat["name"], tle1, tle2)
@@ -679,11 +679,12 @@ class Orchestrator:
                 int(1.25 * self.update_interval_hours),
             )
 
-            # Filter out passes that have already ended
+            # Filter out passes that have already ended more than 90m ago
             now = datetime.datetime.now()
-            next_passes = [(sat, p) for sat, p in next_passes if p["end_time"] > now]
+            # We want to keep recent past passes for UI
+            next_passes = [(sat, p) for sat, p in next_passes if p["end_time"] > now - datetime.timedelta(minutes=90)]
 
-            next_passes = [(sat, p) for sat, p in next_passes if p["end_time"] > now]
+            next_passes.sort(key=lambda x: x[1]["start_time"])
 
             self.tui.update_passes(next_passes)
             asyncio.create_task(self.web_server.update_passes(next_passes))
