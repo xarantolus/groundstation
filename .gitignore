@@ -11,3 +11,6 @@ flowgraphs/*.py
 **__pycache__**
 *.raw
 !.github/img/*
+image_cleaner/target
+image_cleaner_cache**
+examples
