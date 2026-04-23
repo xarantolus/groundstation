@@ -4,11 +4,11 @@ ARG TAG=latest
 
 FROM ${GHCR_REGISTRY}/${GITHUB_REPOSITORY}/gs:${TAG}
 
-COPY noaa_apt_decoder.grc /tmp/noaa_apt_decoder.grc
+COPY ax100_decoder.grc /tmp/ax100_decoder.grc
 
 RUN cd /tmp && \
-	grcc noaa_apt_decoder.grc && \
-	mv noaa_apt_decoder.py /usr/local/bin/noaa_apt_decoder.py && \
-	chmod +x /usr/local/bin/noaa_apt_decoder.py
+	grcc ax100_decoder.grc && \
+	mv ax1ö00_decoder.py /usr/local/bin/ax100_decoder.py && \
+	chmod +x /usr/local/bin/ax100_decoder.py
 
-CMD ["noaa_apt_decoder.py"]
+CMD ["ax100_decoder.py"]
