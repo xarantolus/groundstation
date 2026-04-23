@@ -92,6 +92,225 @@ satellites:
         min_files: 1
     skip_iq_upload: true
 
+  # AX100 satellites
+  - name: AISTECHSAT-2
+    norad: 43768
+    frequency: 436.730e6
+    bandwidth: 200e3
+    sample_rate: 1.024e6
+    lo_offset: 100e3
+    priority: 6
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: ax100
+        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
+        min_size_bytes: 1
+  - name: CATSAT
+    norad: 60246
+    frequency: 437.185e6
+    bandwidth: 200e3
+    sample_rate: 1.024e6
+    lo_offset: 100e3
+    priority: 6
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: ax100
+        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
+        min_size_bytes: 1
+  - name: GALASSIA-2
+    norad: 57486
+    frequency: 436.400e6
+    bandwidth: 200e3
+    sample_rate: 1.024e6
+    lo_offset: 100e3
+    priority: 6
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: ax100
+        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
+        min_size_bytes: 1
+  - name: INNOCUBE
+    norad: 62616
+    frequency: 435.950e6
+    bandwidth: 200e3
+    sample_rate: 1.024e6
+    lo_offset: 100e3
+    priority: 6
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: ax100
+        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
+        min_size_bytes: 1
+  - name: ION-MK01
+    norad: 46274
+    frequency: 437.515e6
+    bandwidth: 200e3
+    sample_rate: 1.024e6
+    lo_offset: 100e3
+    priority: 6
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: ax100
+        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
+        min_size_bytes: 1
+  - name: K-HERO
+    norad: 98489
+    frequency: 437.180e6
+    bandwidth: 200e3
+    sample_rate: 1.024e6
+    lo_offset: 100e3
+    priority: 6
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: ax100
+        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
+        min_size_bytes: 1
+  - name: Luojia-1
+    norad: 43485
+    frequency: 437.250e6
+    bandwidth: 200e3
+    sample_rate: 1.024e6
+    lo_offset: 100e3
+    priority: 6
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: ax100
+        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
+        min_size_bytes: 1
+  - name: MIMAN
+    norad: 52900
+    frequency: 436.500e6
+    bandwidth: 200e3
+    sample_rate: 1.024e6
+    lo_offset: 100e3
+    priority: 6
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: ax100
+        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
+        min_size_bytes: 1
+  - name: NUSHSAT-1
+    norad: 63211
+    frequency: 436.200e6
+    bandwidth: 200e3
+    sample_rate: 1.024e6
+    lo_offset: 100e3
+    priority: 6
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: ax100
+        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
+        min_size_bytes: 1
+  - name: SNIPE-1
+    norad: 56749
+    frequency: 435.450e6
+    bandwidth: 200e3
+    sample_rate: 1.024e6
+    lo_offset: 100e3
+    priority: 6
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: ax100
+        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
+        min_size_bytes: 1
+  - name: SNIPE-2
+    norad: 56745
+    frequency: 436.000e6
+    bandwidth: 200e3
+    sample_rate: 1.024e6
+    lo_offset: 100e3
+    priority: 6
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: ax100
+        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
+        min_size_bytes: 1
+  - name: SNIPE-4
+    norad: 56744
+    frequency: 437.800e6
+    bandwidth: 200e3
+    sample_rate: 1.024e6
+    lo_offset: 100e3
+    priority: 6
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: ax100
+        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
+        min_size_bytes: 1
+  - name: Suomi 100
+    norad: 43804
+    frequency: 437.775e6
+    bandwidth: 200e3
+    sample_rate: 1.024e6
+    lo_offset: 100e3
+    priority: 6
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: ax100
+        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
+        min_size_bytes: 1
+  - name: UND ROADS 1
+    norad: 64535
+    frequency: 435.400e6
+    bandwidth: 200e3
+    sample_rate: 1.024e6
+    lo_offset: 100e3
+    priority: 6
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: ax100
+        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
+        min_size_bytes: 1
+  - name: UND ROADS 2
+    norad: 64549
+    frequency: 435.400e6
+    bandwidth: 200e3
+    sample_rate: 1.024e6
+    lo_offset: 100e3
+    priority: 6
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: ax100
+        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
+        min_size_bytes: 1
+  - name: VELOX-AM
+    norad: 57482
+    frequency: 437.125e6
+    bandwidth: 200e3
+    sample_rate: 1.024e6
+    lo_offset: 100e3
+    priority: 6
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: ax100
+        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
+        min_size_bytes: 1
+  - name: BEE-1000
+    norad: 66650
+    frequency: 436.500e6
+    bandwidth: 200e3
+    sample_rate: 1.024e6
+    lo_offset: 100e3
+    priority: 4
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: ax100
+        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
+        min_size_bytes: 1
+  - name: GREENCUBE
+    norad: 53106
+    frequency: 435.310e6
+    bandwidth: 200e3
+    sample_rate: 1.024e6
+    lo_offset: 100e3
+    priority: 4
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: ax100
+        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
+        min_size_bytes: 1
+
+
 nas_directory: /mnt/nas
 
 pass_elevation_threshold_deg: 10
