@@ -1,6 +1,48 @@
+import itertools
 import os
 import yaml
-from typing import Any, Dict
+from typing import Any, Dict, List
+
+
+def _expand_decoder_matrix(decoder: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Expands a decoder whose `env` has list-valued entries into multiple
+    decoders via cross product. Each resulting decoder gets a name suffix
+    encoding the matrix values so output subdirectories don't collide.
+    """
+    env = decoder.get("env")
+    if not env:
+        return [decoder]
+
+    matrix_keys: List[str] = []
+    matrix_values: List[list] = []
+    scalar_env: Dict[str, Any] = {}
+    for k, v in env.items():
+        if isinstance(v, list):
+            matrix_keys.append(k)
+            matrix_values.append(v)
+        else:
+            scalar_env[k] = v
+
+    if not matrix_keys:
+        return [decoder]
+
+    expanded: List[Dict[str, Any]] = []
+    base_name = decoder.get("name")
+    for combo in itertools.product(*matrix_values):
+        new_env = dict(scalar_env)
+        suffix_parts: List[str] = []
+        for key, val in zip(matrix_keys, combo):
+            new_env[key] = val
+            suffix_parts.append(str(val))
+        suffix = "_".join(suffix_parts)
+
+        new_decoder = dict(decoder)
+        new_decoder["env"] = new_env
+        new_decoder["name"] = f"{base_name}_{suffix}" if base_name else suffix
+        expanded.append(new_decoder)
+
+    return expanded
 
 
 def load_config(path: str) -> Dict[str, Any]:
@@ -159,6 +201,15 @@ def load_config(path: str) -> Dict[str, Any]:
                     raise TypeError(
                         f"Decoder for satellite '{sat['name']}' must be a string, dictionary, list or None"
                     )
+
+                # Expand any matrix (list-valued env) decoders into concrete runs
+                if isinstance(decoder, dict):
+                    expanded = _expand_decoder_matrix(decoder)
+                    sat["decoder"] = expanded[0] if len(expanded) == 1 else expanded
+                elif isinstance(decoder, list):
+                    sat["decoder"] = [
+                        e for d in decoder for e in _expand_decoder_matrix(d)
+                    ]
 
         # If skip_iq_upload is True, then the decoder must be set
         if sat.get("skip_iq_upload", False) and not sat.get("decoder"):

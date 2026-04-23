@@ -105,6 +105,9 @@ satellites:
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
+        env:
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+
   - name: CATSAT
     norad: 60246
     frequency: 437.185e6
@@ -117,6 +120,8 @@ satellites:
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
+        env:
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
   - name: GALASSIA-2
     norad: 57486
     frequency: 436.400e6
@@ -129,6 +134,8 @@ satellites:
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
+        env:
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
   - name: INNOCUBE
     norad: 62616
     frequency: 435.950e6
@@ -141,6 +148,8 @@ satellites:
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
+        env:
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
   - name: ION-MK01
     norad: 46274
     frequency: 437.515e6
@@ -153,6 +162,8 @@ satellites:
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
+        env:
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
   - name: K-HERO
     norad: 98489
     frequency: 437.180e6
@@ -165,6 +176,8 @@ satellites:
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
+        env:
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
   - name: Luojia-1
     norad: 43485
     frequency: 437.250e6
@@ -177,6 +190,8 @@ satellites:
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
+        env:
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
   - name: MIMAN
     norad: 52900
     frequency: 436.500e6
@@ -189,6 +204,8 @@ satellites:
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
+        env:
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
   - name: NUSHSAT-1
     norad: 63211
     frequency: 436.200e6
@@ -201,6 +218,8 @@ satellites:
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
+        env:
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
   - name: SNIPE-1
     norad: 56749
     frequency: 435.450e6
@@ -213,6 +232,8 @@ satellites:
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
+        env:
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
   - name: SNIPE-2
     norad: 56745
     frequency: 436.000e6
@@ -225,6 +246,8 @@ satellites:
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
+        env:
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
   - name: SNIPE-4
     norad: 56744
     frequency: 437.800e6
@@ -237,6 +260,8 @@ satellites:
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
+        env:
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
   - name: Suomi 100
     norad: 43804
     frequency: 437.775e6
@@ -249,6 +274,8 @@ satellites:
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
+        env:
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
   - name: UND ROADS 1
     norad: 64535
     frequency: 435.400e6
@@ -261,6 +288,8 @@ satellites:
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
+        env:
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
   - name: UND ROADS 2
     norad: 64549
     frequency: 435.400e6
@@ -273,6 +302,8 @@ satellites:
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
+        env:
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
   - name: VELOX-AM
     norad: 57482
     frequency: 437.125e6
@@ -285,6 +316,8 @@ satellites:
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
+        env:
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
   - name: BEE-1000
     norad: 66650
     frequency: 436.500e6
@@ -297,6 +330,8 @@ satellites:
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
+        env:
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
   - name: GREENCUBE
     norad: 53106
     frequency: 435.310e6
@@ -309,6 +344,8 @@ satellites:
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
+        env:
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
 
 
 nas_directory: /mnt/nas

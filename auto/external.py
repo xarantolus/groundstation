@@ -210,17 +210,23 @@ async def run_decoder(
                 pass
         raise  # Re-raise to ensure cancellation propagates
 
-    # Count how many files were created, recursively
+    min_size = decoder.get("min_size_bytes") or 0
+    if min_size > 0:
+        for root, _, filenames in os.walk(pass_out_dir):
+            for filename in filenames:
+                file_path = os.path.join(root, filename)
+                if os.path.getsize(file_path) < min_size:
+                    os.remove(file_path)
+                    logging.info(
+                        f"Removed {file_path}: smaller than min_size_bytes={min_size}"
+                    )
+
     files = []
-    total_filesize = 0
     for root, _, filenames in os.walk(pass_out_dir):
         for filename in filenames:
-            file_path = os.path.join(root, filename)
-            files.append(file_path)
-            total_filesize += os.path.getsize(file_path)
+            files.append(os.path.join(root, filename))
 
     min_files = decoder.get("min_files", 1)
-    min_size = decoder.get("min_size_bytes", 0)
 
-    if dec_name and (len(files) < min_files or total_filesize < min_size):
+    if dec_name and len(files) < min_files:
         shutil.rmtree(pass_out_dir)
