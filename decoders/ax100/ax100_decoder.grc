@@ -40,6 +40,42 @@ blocks:
     coordinate: [264, 136.0]
     rotation: 0
     state: enabled
+- name: target_sps
+  id: variable
+  parameters:
+    comment: Target samples-per-symbol after decimation
+    value: '8'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [504, 136.0]
+    rotation: 0
+    state: enabled
+- name: decim
+  id: variable
+  parameters:
+    comment: Decimation so the demod runs at ~target_sps * baud_rate
+    value: max(1, int(samp_rate // (baud_rate * target_sps)))
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [608, 136.0]
+    rotation: 0
+    state: enabled
+- name: dec_samp_rate
+  id: variable
+  parameters:
+    comment: Sample rate after freq_xlating_fir_filter decimation
+    value: samp_rate / decim
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [712, 136.0]
+    rotation: 0
+    state: enabled
 - name: deviation
   id: variable
   parameters:
@@ -178,7 +214,7 @@ blocks:
     alias: ''
     center_freq: '0'
     comment: ''
-    decim: '1'
+    decim: decim
     maxoutbuf: '0'
     minoutbuf: '0'
     samp_rate: samp_rate
@@ -252,7 +288,7 @@ blocks:
     maxoutbuf: '0'
     minoutbuf: '0'
     options: '"--deviation " + str(deviation)'
-    samp_rate: samp_rate
+    samp_rate: dec_samp_rate
     subaudio: 'False'
   states:
     bus_sink: false
