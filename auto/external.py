@@ -136,11 +136,15 @@ async def run_recorder(
     return out_file
 
 
+DEFAULT_DECODER_TIMEOUT_MINUTES: float | None = 30.0
+
+
 async def run_decoder(
     sat_conf: Satellite,
     decoder: Decoder,
     pass_dir: str,
     log_callback: Optional[Callable[[str], None]] = None,
+    timeout_minutes: float | None = DEFAULT_DECODER_TIMEOUT_MINUTES,
 ):
     """
     Runs a podman container to decode the recording.
@@ -150,7 +154,14 @@ async def run_decoder(
         sat_conf: Dictionary with satellite configuration
         pass_dir: Directory where the recording is stored and where outputs will be saved
         log_callback: Optional callback for streaming logs
+        timeout_minutes: Maximum wall-clock runtime for the container in minutes. If None,
+            no timeout is enforced. The decoder's own ``timeout_minutes`` (if set) overrides
+            this value; pass None in the decoder config to opt out entirely.
     """
+
+    dec_timeout = decoder.get("timeout_minutes", timeout_minutes)
+    if dec_timeout is not None and dec_timeout <= 0:
+        dec_timeout = None
 
     pass_out_dir = pass_dir
     dec_name = decoder.get("name")
@@ -192,22 +203,34 @@ async def run_decoder(
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
 
-    try:
-        await asyncio.gather(
-            _read_stream(process.stdout, log_callback),
-            _read_stream(process.stderr, log_callback, "ERR: "),
-            process.wait(),
-        )
-    except asyncio.CancelledError:
-        logging.warning("Decoder process cancelled. Terminating...")
+    async def _terminate_process():
         try:
             process.terminate()
-            await asyncio.wait_for(process.wait(), timeout=5)
+            await asyncio.wait_for(process.wait(), timeout=15)
         except Exception:
             try:
                 process.kill()
             except ProcessLookupError:
                 pass
+
+    gathered = asyncio.gather(
+        _read_stream(process.stdout, log_callback),
+        _read_stream(process.stderr, log_callback, "ERR: "),
+        process.wait(),
+    )
+    try:
+        if dec_timeout is None:
+            await gathered
+        else:
+            await asyncio.wait_for(gathered, timeout=dec_timeout * 60)
+    except asyncio.TimeoutError:
+        logging.warning(
+            f"Decoder process exceeded timeout of {dec_timeout} minutes. Terminating..."
+        )
+        await _terminate_process()
+    except asyncio.CancelledError:
+        logging.warning("Decoder process cancelled. Terminating...")
+        await _terminate_process()
         raise  # Re-raise to ensure cancellation propagates
 
     min_size = decoder.get("min_size_bytes") or 0

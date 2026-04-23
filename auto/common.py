@@ -16,6 +16,8 @@ class Decoder(TypedDict):
     min_files: int | None
     # if the total size of output files is less than this, nothing will be uploaded
     min_size_bytes: int | None
+    # maximum runtime in minutes before the container is terminated; None (or omitted) disables the timeout
+    timeout_minutes: float | None
 
 
 class Satellite(TypedDict):

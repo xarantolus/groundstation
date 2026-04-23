@@ -148,6 +148,14 @@ def load_config(path: str) -> Dict[str, Any]:
                         raise TypeError(
                             f"Decoder 'min_files' for satellite '{sat['name']}' must be an integer or None"
                         )
+                    if (
+                        "timeout_minutes" in decoder
+                        and decoder["timeout_minutes"] is not None
+                        and not isinstance(decoder["timeout_minutes"], (int, float))
+                    ):
+                        raise TypeError(
+                            f"Decoder 'timeout_minutes' for satellite '{sat['name']}' must be a number or None"
+                        )
                 elif isinstance(decoder, list):
                     # List of Decoder objects
                     for i, d in enumerate(decoder):
@@ -196,6 +204,14 @@ def load_config(path: str) -> Dict[str, Any]:
                         ):
                             raise TypeError(
                                 f"Decoder 'min_files' at index {i} for satellite '{sat['name']}' must be an integer or None"
+                            )
+                        if (
+                            "timeout_minutes" in d
+                            and d["timeout_minutes"] is not None
+                            and not isinstance(d["timeout_minutes"], (int, float))
+                        ):
+                            raise TypeError(
+                                f"Decoder 'timeout_minutes' at index {i} for satellite '{sat['name']}' must be a number or None"
                             )
                 else:
                     raise TypeError(
