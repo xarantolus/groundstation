@@ -23,7 +23,6 @@ import libcsp_py3 as csp
 # CRC32-C function (Castagnoli polynomial), as used by CSP1 with FCRC32 flag
 crc32c_fn = crcmod.predefined.mkCrcFun("crc-32c")
 
-# Map flag bits -> human-readable names, sourced from libcsp constants.
 # XTEA was removed in libcsp 2.x; only register flags the binding exposes.
 CSP_FLAG_NAMES = {
     getattr(csp, attr): name

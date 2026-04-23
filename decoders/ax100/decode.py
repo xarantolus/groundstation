@@ -52,6 +52,70 @@ def scan_packets(raw: bytes, max_payload: int, filter_src: int | None,
     return results
 
 
+KISS_FEND = 0xC0
+KISS_FESC = 0xDB
+KISS_TFEND = 0xDC
+KISS_TFESC = 0xDD
+
+
+def _kiss_unescape(body: bytes) -> bytes:
+    out = bytearray()
+    i = 0
+    while i < len(body):
+        b = body[i]
+        if b == KISS_FESC and i + 1 < len(body):
+            nxt = body[i + 1]
+            out.append(KISS_FEND if nxt == KISS_TFEND else
+                       KISS_FESC if nxt == KISS_TFESC else nxt)
+            i += 2
+        else:
+            out.append(b)
+            i += 1
+    return bytes(out)
+
+
+def parse_kiss_frames(raw: bytes, filter_src: int | None,
+                      filter_dst: int | None) -> list:
+    """Parse KISS-framed file: each packet is FEND TYPE <escaped bytes> FEND."""
+    results = []
+    offset = 0
+    length = len(raw)
+    while offset < length:
+        if raw[offset] != KISS_FEND:
+            offset += 1
+            continue
+        start = offset
+        end = raw.find(bytes([KISS_FEND]), offset + 1)
+        if end == -1:
+            break
+        frame = raw[offset + 1:end]
+        offset = end + 1
+        if len(frame) < 1 + 4:
+            continue
+        # gr-satellites' u482c_decode emits non-data KISS frames (e.g. type 0x09
+        # metadata) alongside data frames; those would parse as garbage CSP headers.
+        if frame[0] & 0x0F != 0x00:
+            continue
+        body = _kiss_unescape(frame[1:])
+        if len(body) < 4:
+            continue
+        hdr_bytes = body[:4]
+        hdr = parse_header(hdr_bytes)
+        if filter_src is not None and hdr["src"] != filter_src:
+            continue
+        if filter_dst is not None and hdr["dst"] != filter_dst:
+            continue
+        results.append({
+            "offset": start,
+            "header": hdr,
+            "header_raw": hdr_bytes,
+            "payload": body[4:],
+            "crc_ok": None,
+            "total_len": end - start + 1,
+        })
+    return results
+
+
 def parse_packets_no_crc(raw: bytes, filter_src: int | None,
                          filter_dst: int | None) -> list:
     """Treat the file as a single CSP packet (header + payload, no CRC).
@@ -83,7 +147,7 @@ def parse_packets_no_crc(raw: bytes, filter_src: int | None,
 def print_packet(i: int, pkt: dict, file=sys.stderr):
     h = pkt["header"]
     payload = pkt["payload"]
-    print(f"--- Packet {i} @ offset {pkt['offset']} ({pkt['total_len']} bytes) ---", file=file)
+    print(f"Packet {i} @ offset {pkt['offset']} ({pkt['total_len']} bytes)", file=file)
     print(f"  Header : {pkt['header_raw'].hex()}", file=file)
     print(f"  prio={h['prio']} src={h['src']} dst={h['dst']} "
           f"dport={h['dport']} sport={h['sport']} "
@@ -102,6 +166,7 @@ def print_packet(i: int, pkt: dict, file=sys.stderr):
         pass
 
     print(f"  Hex    : {payload.hex()}", file=file)
+    print("", file=file)
 
 
 def main():
@@ -119,6 +184,8 @@ def main():
                                 "(header + payload, no boundary scanning).")
     crc_group.add_argument("--crc", action="store_true",
                            help="Force CRC mode (scan for packets with CRC32-C).")
+    crc_group.add_argument("--kiss", action="store_true",
+                           help="Force KISS mode (FEND-delimited frames).")
     parser.add_argument("--raw", action="store_true",
                         help="Write raw payload bytes to stdout (one per line)")
     args = parser.parse_args()
@@ -134,6 +201,12 @@ def main():
     elif args.crc:
         mode = "crc"
         packets = scan_packets(data, args.max_payload, args.src, args.dst)
+    elif args.kiss:
+        mode = "kiss"
+        packets = parse_kiss_frames(data, args.src, args.dst)
+    elif data.startswith(b"\xc0"):
+        packets = parse_kiss_frames(data, args.src, args.dst)
+        mode = "kiss (auto)"
     else:
         # Auto-detect: try CRC mode first, fall back to no-CRC if nothing found
         packets = scan_packets(data, args.max_payload, args.src, args.dst)
