@@ -1,0 +1,9 @@
+[project]
+name = "ax100-csp-decode"
+version = "0.1.0"
+description = "Decode CSP packets produced by the ax100 GNU Radio flow graph."
+requires-python = ">=3.10"
+dependencies = [
+    "crcmod>=1.7",
+    "libcsp-py3 @ git+https://github.com/xarantolus/libcsp.git@libcsp-2-1-python",
+]
