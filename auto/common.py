@@ -14,6 +14,8 @@ class Decoder(TypedDict):
     env: Dict[str, str] | None
     # if less than this number of output files are created, nothing will be uploaded
     min_files: int | None
+    # if the total size of output files is less than this, nothing will be uploaded
+    min_size_bytes: int | None
 
 
 class Satellite(TypedDict):

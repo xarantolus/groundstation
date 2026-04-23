@@ -212,11 +212,15 @@ async def run_decoder(
 
     # Count how many files were created, recursively
     files = []
+    total_filesize = 0
     for root, _, filenames in os.walk(pass_out_dir):
         for filename in filenames:
             file_path = os.path.join(root, filename)
-            if os.path.isfile(file_path):
-                files.append(file_path)
+            files.append(file_path)
+            total_filesize += os.path.getsize(file_path)
 
-    if dec_name and (len(files) < decoder.get("min_files", 1)):
+    min_files = decoder.get("min_files", 1)
+    min_size = decoder.get("min_size_bytes", 0)
+
+    if dec_name and (len(files) < min_files or total_filesize < min_size):
         shutil.rmtree(pass_out_dir)
