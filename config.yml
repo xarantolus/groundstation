@@ -122,20 +122,6 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-  - name: GALASSIA-2
-    norad: 57486
-    frequency: 436.400e6
-    bandwidth: 200e3
-    sample_rate: 1.024e6
-    lo_offset: 100e3
-    priority: 6
-    decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
-      - name: ax100
-        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
-        min_size_bytes: 1
-        env:
-          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
   - name: INNOCUBE
     norad: 62616
     frequency: 435.950e6
@@ -150,22 +136,8 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-  - name: ION-MK01
-    norad: 46274
-    frequency: 437.515e6
-    bandwidth: 200e3
-    sample_rate: 1.024e6
-    lo_offset: 100e3
-    priority: 6
-    decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
-      - name: ax100
-        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
-        min_size_bytes: 1
-        env:
-          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
   - name: K-HERO
-    norad: 98489
+    norad: 66660
     frequency: 437.180e6
     bandwidth: 200e3
     sample_rate: 1.024e6
@@ -293,20 +265,6 @@ satellites:
   - name: UND ROADS 2
     norad: 64549
     frequency: 435.400e6
-    bandwidth: 200e3
-    sample_rate: 1.024e6
-    lo_offset: 100e3
-    priority: 6
-    decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
-      - name: ax100
-        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
-        min_size_bytes: 1
-        env:
-          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-  - name: VELOX-AM
-    norad: 57482
-    frequency: 437.125e6
     bandwidth: 200e3
     sample_rate: 1.024e6
     lo_offset: 100e3
