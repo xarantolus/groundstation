@@ -57,20 +57,6 @@ RUN --mount=type=cache,target=/tmp/itpp-4.3.1 \
 	make install && \
 	ldconfig
 
-RUN --mount=type=cache,target=/tmp/gr-satnogs \
-	if [ -d /tmp/gr-satnogs/.git ]; then \
-	cd /tmp/gr-satnogs && git pull; \
-	else \
-	git clone https://gitlab.com/librespacefoundation/satnogs/gr-satnogs.git --recurse-submodules /tmp/gr-satnogs; \
-	fi && \
-	cd /tmp/gr-satnogs && \
-	mkdir -p build && \
-	cd build && \
-	cmake -DCMAKE_BUILD_TYPE=Release .. && \
-	make -j$(nproc) && \
-	make install && \
-	ldconfig
-
 RUN --mount=type=cache,target=/tmp/rtl-sdr-blog \
 	--mount=type=cache,target=/var/cache/dnf \
 	dnf install -y libusb1-devel && \
