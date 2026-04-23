@@ -1,0 +1,374 @@
+options:
+  parameters:
+    author: Philipp Erhardt, based on work by Manolis Surligas, George Vardakis
+    catch_exceptions: 'True'
+    category: '[GRC Hier Blocks]'
+    cmake_opt: ''
+    comment: ''
+    copyright: ''
+    description: A NOAA APT Decoder with automatic image synchronization
+    gen_cmake: 'On'
+    gen_linking: dynamic
+    generate_options: no_gui
+    hier_block_src_path: '.:'
+    id: noaa_apt_decoder
+    max_nouts: '0'
+    output_language: python
+    placement: (0,0)
+    qt_qss_theme: ''
+    realtime_scheduling: ''
+    run: 'True'
+    run_command: '{python} -u {filename}'
+    run_options: run
+    sizing_mode: fixed
+    thread_safe_setters: ''
+    title: NOAA APT Decoder
+    window_size: 2048,1080
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [8, 8]
+    rotation: 0
+    state: enabled
+
+blocks:
+- name: audio_samp_rate
+  id: variable
+  parameters:
+    comment: ''
+    value: '48000'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [64, 156.0]
+    rotation: 0
+    state: enabled
+- name: packet_len
+  id: variable
+  parameters:
+    comment: ''
+    value: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1696, 684.0]
+    rotation: 0
+    state: enabled
+- name: target_rate
+  id: variable
+  parameters:
+    comment: ''
+    value: 4*4160*4
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1056, 36.0]
+    rotation: 0
+    state: enabled
+- name: analog_wfm_rcv_0
+  id: analog_wfm_rcv
+  parameters:
+    affinity: ''
+    alias: ''
+    audio_decimation: '1'
+    comment: ''
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    quad_rate: 4*4160*4
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [656, 596.0]
+    rotation: 180
+    state: enabled
+- name: band_pass_filter_0
+  id: band_pass_filter
+  parameters:
+    affinity: ''
+    alias: ''
+    beta: '6.76'
+    comment: ''
+    decim: '4'
+    gain: '1'
+    high_cutoff_freq: 4.2e3
+    interp: '1'
+    low_cutoff_freq: '500'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    samp_rate: (4*4160*4 )
+    type: fir_filter_fff
+    width: '200'
+    win: window.WIN_HAMMING
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [440, 548.0]
+    rotation: 180
+    state: enabled
+- name: blocks_complex_to_mag_0
+  id: blocks_complex_to_mag
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: ''
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [200, 768.0]
+    rotation: 0
+    state: enabled
+- name: blocks_file_source_0
+  id: blocks_file_source
+  parameters:
+    affinity: ''
+    alias: ''
+    begin_tag: pmt.PMT_NIL
+    comment: ''
+    file: /data/recording.bin
+    length: '0'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    offset: '0'
+    repeat: 'False'
+    type: complex
+    vlen: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [128, 332.0]
+    rotation: 0
+    state: enabled
+- name: flip_images
+  id: parameter
+  parameters:
+    alias: ''
+    comment: ''
+    hide: none
+    label: ''
+    short_id: ''
+    type: intx
+    value: '0'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [216, 148.0]
+    rotation: 0
+    state: enabled
+- name: hilbert_fc_0
+  id: hilbert_fc
+  parameters:
+    affinity: ''
+    alias: ''
+    beta: '6.76'
+    comment: ''
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    num_taps: '65'
+    win: window.WIN_HAMMING
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [200, 604.0]
+    rotation: 180
+    state: enabled
+- name: import_0
+  id: import
+  parameters:
+    alias: ''
+    comment: ''
+    imports: from fractions import Fraction
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1304, 92.0]
+    rotation: 0
+    state: enabled
+- name: import_0_0
+  id: import
+  parameters:
+    alias: ''
+    comment: ''
+    imports: import Hamlib
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1664, 28.0]
+    rotation: 0
+    state: true
+- name: import_0_1
+  id: import
+  parameters:
+    alias: ''
+    comment: ''
+    imports: import os
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1312, 148.0]
+    rotation: 0
+    state: enabled
+- name: low_pass_filter_0_0
+  id: low_pass_filter
+  parameters:
+    affinity: ''
+    alias: ''
+    beta: '6.76'
+    comment: ''
+    cutoff_freq: 4*4160*1.1
+    decim: '1'
+    gain: '1'
+    interp: '1'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    samp_rate: 4*4160*4
+    type: fir_filter_ccf
+    width: 1e3
+    win: window.WIN_HAMMING
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [856, 288.0]
+    rotation: 0
+    state: enabled
+- name: ppm
+  id: parameter
+  parameters:
+    alias: ''
+    comment: 'The frequency correction in PPM
+
+      to correct for a local oscillator frequency deviation'
+    hide: none
+    label: ''
+    short_id: ''
+    type: eng_float
+    value: '0'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [424, 148.0]
+    rotation: 0
+    state: enabled
+- name: rational_resampler_xxx_0
+  id: rational_resampler_xxx
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: ''
+    decim: Fraction(target_rate, int(samp_rate_rx)).limit_denominator().denominator
+    fbw: '0'
+    interp: Fraction(target_rate, int(samp_rate_rx)).limit_denominator().numerator
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    taps: '[]'
+    type: ccc
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [552, 324.0]
+    rotation: 0
+    state: enabled
+- name: rational_resampler_xxx_0_0
+  id: rational_resampler_xxx
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: ''
+    decim: '4'
+    fbw: '0'
+    interp: '1'
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    taps: ''
+    type: fff
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [488, 812.0]
+    rotation: 0
+    state: enabled
+- name: samp_rate_rx
+  id: parameter
+  parameters:
+    alias: ''
+    comment: ''
+    hide: none
+    label: Device Sampling rate
+    short_id: ''
+    type: eng_float
+    value: float(os.getenv('SAMP_RATE', '200e3'))
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [648, 28.0]
+    rotation: 0
+    state: enabled
+- name: satnogs_noaa_apt_sink_0
+  id: satnogs_noaa_apt_sink
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: ''
+    filename_png: /output/output.png
+    flip: 'False'
+    height: '1800'
+    sync: 'True'
+    width: '2080'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1000, 780.0]
+    rotation: 0
+    state: enabled
+- name: sync
+  id: parameter
+  parameters:
+    alias: ''
+    comment: ''
+    hide: none
+    label: ''
+    short_id: ''
+    type: intx
+    value: '1'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [320, 148.0]
+    rotation: 0
+    state: enabled
+
+connections:
+- [analog_wfm_rcv_0, '0', band_pass_filter_0, '0']
+- [band_pass_filter_0, '0', hilbert_fc_0, '0']
+- [blocks_complex_to_mag_0, '0', rational_resampler_xxx_0_0, '0']
+- [blocks_file_source_0, '0', rational_resampler_xxx_0, '0']
+- [hilbert_fc_0, '0', blocks_complex_to_mag_0, '0']
+- [low_pass_filter_0_0, '0', analog_wfm_rcv_0, '0']
+- [rational_resampler_xxx_0, '0', low_pass_filter_0_0, '0']
+- [rational_resampler_xxx_0_0, '0', satnogs_noaa_apt_sink_0, '0']
+
+metadata:
+  file_format: 1
+  grc_version: 3.10.11.0
