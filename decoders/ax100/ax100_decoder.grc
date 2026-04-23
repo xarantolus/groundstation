@@ -32,7 +32,7 @@ blocks:
   id: variable
   parameters:
     comment: AX100 symbol rate
-    value: os.getenv("BAUD_RATE", 4800)
+    value: int(os.getenv("BAUD_RATE", 4800))
   states:
     bus_sink: false
     bus_source: false

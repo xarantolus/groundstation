@@ -1,8 +1,6 @@
 #!/bin/bash
-set -eo pipefail
 
-# Run the GNU Radio flow graph: /data/recording.bin -> /output/csp_packets.bin
-ax100_decoder.py
+ax100_decoder.py || echo "ax100_decoder.py exited with non-zero status $?" >&2
 
 # Decode any CSP packets that the flow graph produced.
 if [ -s /output/csp_packets.bin ]; then

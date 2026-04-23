@@ -88,6 +88,29 @@ RUN --mount=type=cache,target=/tmp/gr-osmosdr \
 	make install && \
 	ldconfig
 
+RUN --mount=type=cache,target=/var/cache/dnf \
+	dnf install -y --setopt=keepcache=1 \
+	swig \
+	python3-construct \
+	python3-pyyaml \
+	python3-pyzmq \
+	python3-requests \
+	python3-websocket-client
+
+RUN --mount=type=cache,target=/tmp/gr-satellites \
+	if [ -d /tmp/gr-satellites/.git ]; then \
+	cd /tmp/gr-satellites && git pull; \
+	else \
+	git clone --depth=1 https://github.com/daniestevez/gr-satellites.git /tmp/gr-satellites; \
+	fi && \
+	cd /tmp/gr-satellites && \
+	mkdir -p build && \
+	cd build && \
+	cmake -DCMAKE_BUILD_TYPE=Release .. && \
+	make -j$(nproc) && \
+	make install && \
+	ldconfig
+
 COPY auto/requirements.txt /tmp/requirements.txt
 
 RUN --mount=type=cache,target=/root/.cache/pip \
