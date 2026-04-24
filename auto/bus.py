@@ -80,6 +80,9 @@ class EventBus:
             pass
 
 
+_CLOSE_SENTINEL = object()
+
+
 class Subscription:
     def __init__(self, bus: EventBus, sub: _Subscriber) -> None:
         self._bus = bus
@@ -91,9 +94,11 @@ class Subscription:
 
     async def _iter(self) -> AsyncIterator[Event]:
         try:
-            while not self._closed:
+            while True:
                 event = await self._sub.queue.get()
-                yield event
+                if event is _CLOSE_SENTINEL:
+                    break
+                yield event  # type: ignore[misc]
         finally:
             self.close()
 
@@ -101,9 +106,23 @@ class Subscription:
         return await self._sub.queue.get()
 
     def close(self) -> None:
-        if not self._closed:
-            self._closed = True
-            self._bus._detach(self._sub)
+        if self._closed:
+            return
+        self._closed = True
+        self._bus._detach(self._sub)
+        # Wake any consumer parked on queue.get(). If the queue is full we
+        # drop the oldest item to make room — callers are shutting down and
+        # won't miss the event.
+        q = self._sub.queue
+        while True:
+            try:
+                q.put_nowait(_CLOSE_SENTINEL)
+                return
+            except asyncio.QueueFull:
+                try:
+                    q.get_nowait()
+                except asyncio.QueueEmpty:
+                    return
 
 
 async def run_subscriber(

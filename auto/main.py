@@ -172,12 +172,19 @@ async def _run(cfg: GroundstationConfig, no_tui: bool) -> None:
     _ = extra_transfers
 
     stop_event = asyncio.Event()
+    signal_count = [0]
 
     def _request_stop(*_: object) -> None:
-        logger.info("shutdown signal received")
-        stop_event.set()
+        signal_count[0] += 1
+        if signal_count[0] == 1:
+            logger.info("shutdown requested — finishing in-flight work (Ctrl+C again to force)")
+            stop_event.set()
+        else:
+            # Second signal: don't run finalisers. We've already asked nicely;
+            # something is stuck. Kill the process directly.
+            logger.warning("second signal — forcing exit")
+            os._exit(130)
 
-    loop = asyncio.get_running_loop()
     try:
         loop.add_signal_handler(signal.SIGINT, _request_stop)
         loop.add_signal_handler(signal.SIGTERM, _request_stop)
@@ -193,17 +200,26 @@ async def _run(cfg: GroundstationConfig, no_tui: bool) -> None:
     finally:
         logger.info("shutting down services")
         for s in services:
-            s.stop()
-        gate.close()
-        for t in tasks:
             try:
-                await asyncio.wait_for(t, timeout=10)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
-                t.cancel()
-                try:
-                    await t
-                except (asyncio.CancelledError, Exception):
-                    pass
+                s.stop()
+            except Exception:
+                logger.exception("service stop() failed")
+        gate.close()
+
+        # Wait for all tasks in parallel with a single deadline, then cancel
+        # anything still running. Sequential waits would multiply the shutdown
+        # time by the number of services.
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True), timeout=10
+            )
+        except asyncio.TimeoutError:
+            logger.warning("services didn't stop in 10s — cancelling")
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
         view_sub.close()
         view_task.cancel()
         try:

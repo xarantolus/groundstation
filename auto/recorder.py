@@ -33,11 +33,12 @@ class RecorderService:
         self._state = state
         self._stop = asyncio.Event()
         self._active: Optional[asyncio.Task] = None
+        self._sub = None
 
     async def run(self) -> None:
-        sub = self._bus.subscribe(E.PassStarted, name="recorder", queue_size=32)
+        self._sub = self._bus.subscribe(E.PassStarted, name="recorder", queue_size=32)
         try:
-            async for event in sub:
+            async for event in self._sub:
                 if self._stop.is_set():
                     break
                 try:
@@ -45,7 +46,7 @@ class RecorderService:
                 except Exception:
                     logger.exception("recorder failed handling PassStarted")
         finally:
-            sub.close()
+            self._sub.close()
             if self._active and not self._active.done():
                 self._active.cancel()
                 try:
@@ -55,6 +56,10 @@ class RecorderService:
 
     def stop(self) -> None:
         self._stop.set()
+        if self._sub is not None:
+            self._sub.close()
+        if self._active and not self._active.done():
+            self._active.cancel()
 
     async def _handle_pass_started(self, event: E.PassStarted) -> None:
         p = event.pass_

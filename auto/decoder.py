@@ -70,7 +70,17 @@ class DecoderService:
                 except asyncio.CancelledError:
                     raise
                 self._in_queue.discard(key)
-                await self._gate.wait_open()
+                if self._stop.is_set() or key[0] == "__stop__":
+                    break
+                # Wait for the gate, but wake up on shutdown so we don't
+                # block indefinitely when the gate happens to be closed.
+                gate_task = asyncio.create_task(self._gate.wait_open())
+                stop_task = asyncio.create_task(self._stop.wait())
+                done, pending = await asyncio.wait(
+                    {gate_task, stop_task}, return_when=asyncio.FIRST_COMPLETED
+                )
+                for t in pending:
+                    t.cancel()
                 if self._stop.is_set():
                     break
                 try:
