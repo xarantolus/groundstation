@@ -52,6 +52,7 @@ def _memory_limit_mb() -> Optional[int]:
 _MEMORY_LIMIT_MB = _memory_limit_mb()
 
 COMMON_FLAGS: List[str] = [
+    "--pull=never",
     "-v",
     f"{os.path.expanduser('~')}/.config/gnuradio/prefs:/root/.config/gnuradio/prefs:z",
 ]
