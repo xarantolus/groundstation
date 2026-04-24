@@ -631,8 +631,8 @@ blocks:
     code: "import logging\r\nlogging.basicConfig(\r\n    level=logging.INFO,\r\n \
       \   format='%(asctime)s - %(levelname)s - %(message)s',\r\n    datefmt='%Y-%m-%d\
       \ %H:%M:%S'\r\n)\r\nlogging.info(f\"Flowgraph started with frequency={self.frequency},\
-      \ bandwidth={self.bandwidth}, sample_rate={self.samp_rate}, lo_offset={self.lo_offset},\
-      \ fs_capture={self.fs_capture}\")"
+      \ bandwidth={self.bandwidth}, gain={self.gain}, sample_rate={self.samp_rate},\
+      \ lo_offset={self.lo_offset}, fs_capture={self.fs_capture}\")"
     comment: ''
     priority: '0'
     section: main_after_init
