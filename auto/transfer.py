@@ -51,9 +51,12 @@ class TransferService:
         return self._active
 
     async def run(self) -> None:
+        reloaded = 0
         for req in self._state.load_transfer_queue():
             await self._queue.put(req)
-        logger.info("transfer: reloaded %d persisted items", self._queue.qsize())
+            reloaded += 1
+        if reloaded:
+            logger.info("transfer: queued %d recovered item(s)", reloaded)
 
         sub = self._bus.subscribe(E.TransferQueued, name="transfer.ingest", queue_size=256)
 

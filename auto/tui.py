@@ -10,6 +10,7 @@ from rich.console import Console, ConsoleOptions, Group, RenderResult
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
+from rich.segment import Segment, Segments
 from rich.table import Table
 from rich.text import Text
 
@@ -164,10 +165,11 @@ class _TUIRenderable:
 
 
 class _TailRenderable:
-    """Renders the tail of a list of Text lines so the newest content is always
-    visible. Rich's default behavior truncates the bottom of a Group when the
-    available height is exceeded; we want the opposite — drop the oldest lines
-    and keep the panel "scrolled" to the end."""
+    """Renders the tail of a list of Text lines so the newest content is
+    pinned to the bottom row of the panel. Trims at the RENDERED-ROW level
+    rather than the logical-line level so that a long wrapped line (or one
+    with embedded newlines — e.g. an exception traceback) can be partially
+    shown above the newest message instead of pushing it off-screen."""
 
     def __init__(self, lines: list[Text]) -> None:
         self._lines = lines
@@ -179,22 +181,28 @@ class _TailRenderable:
                 yield line
             return
 
-        width = options.max_width
-        # Walk from the newest line backwards, counting visual rows (accounting
-        # for wrapping), until we have enough to fill the panel.
-        visible: list[Text] = []
-        rows = 0
+        # Render each Text to its exact segment rows using the root console's
+        # default options (which don't cap height), so a long line's trailing
+        # rows aren't silently dropped by render_lines' internal islice.
+        # Then collect newest→oldest until we have max_height rows.
+        render_opts = console.options.update(max_width=options.max_width)
+        rows: list[list[Segment]] = []
         for line in reversed(self._lines):
-            cell_len = console.measure(line, options=options).maximum
-            wrapped = max(1, -(-cell_len // width)) if width > 0 else 1
-            if rows + wrapped > max_height and visible:
+            rendered = console.render_lines(line, render_opts, pad=False)
+            for row in reversed(rendered):
+                rows.append(row)
+                if len(rows) >= max_height:
+                    break
+            if len(rows) >= max_height:
                 break
-            visible.append(line)
-            rows += wrapped
-            if rows >= max_height:
-                break
-        for line in reversed(visible):
-            yield line
+
+        rows.reverse()
+        segments: list[Segment] = []
+        for i, row in enumerate(rows):
+            if i > 0:
+                segments.append(Segment.line())
+            segments.extend(row)
+        yield Segments(segments)
 
 
 def _level_style(level: str) -> str:

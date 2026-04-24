@@ -106,6 +106,9 @@ def _boot_recovery(
       * RECORDED / DECODING with empty decode queue → re-enqueue decoders
         (covers a crash between RecordingCompleted save and decoder
         pending_decodes persistence)
+      * RECORDED / DECODING with every decoder already settled → advance
+        to DECODED (covers a crash between the last decoder finishing and
+        _after_all_decoders launching)
       * DECODED pass with recording.bin.zst or recording.bin still on disk
         → queue IQ upload (covers a crash between compression and
         transfer_put in DecoderService._after_all_decoders)
@@ -118,14 +121,21 @@ def _boot_recovery(
         req.source_path for req in state.load_transfer_queue()
     }
 
+    recovered_actions: Dict[str, int] = {}
+
+    def _bump(action: str) -> None:
+        recovered_actions[action] = recovered_actions.get(action, 0) + 1
+
     for p in state.load_passes():
         if p.status == PassStatus.RECORDING:
             logger.warning("pass %s was RECORDING at shutdown — recovering as partial", p.id)
             partial = _recover_interrupted_pass(p, state)
+            _bump("recording→partial")
             if partial is not None:
                 partial.destination_path = _nas_path(cfg, p, "recording.bin.zst")
                 state.transfer_put(partial)
                 extra_transfers.append(partial)
+                _bump("partial_iq_queued")
 
         elif p.status in (PassStatus.RECORDED, PassStatus.DECODING):
             missing = _missing_decoders(p, persisted_decode_keys)
@@ -141,11 +151,28 @@ def _boot_recovery(
                     if idx not in p.decoders_pending:
                         p.decoders_pending.append(idx)
                 state.save_pass(p)
+                _bump("decoder_re_enqueued")
+            elif p.satellite.decoder:
+                # No decoders are queued AND none are missing → every decoder
+                # has already settled. We crashed after the last decoder
+                # completed but before _after_all_decoders ran (or before it
+                # advanced status to DECODED/DONE). Fall through to the
+                # DECODED handling below so the IQ upload gets reconstructed.
+                logger.warning(
+                    "pass %s was %s but all %d decoder(s) settled — advancing to DECODED",
+                    p.id,
+                    p.status.value,
+                    len(p.satellite.decoder),
+                )
+                p.status = PassStatus.DECODED
+                state.save_pass(p)
+                _bump("advanced_to_decoded")
 
-        elif p.status == PassStatus.DECODED:
+        if p.status == PassStatus.DECODED:
             # Post-decode IQ upload may not have been queued if we died
             # between compression and transfer_put. Reconstruct the upload
-            # here using whatever survived on disk.
+            # here using whatever survived on disk. Also runs for passes
+            # just advanced from DECODING above.
             if not p.satellite.skip_iq_upload and p.satellite.decoder:
                 iq_zst = os.path.join(p.pass_dir, "recording.bin.zst")
                 iq_bin = os.path.join(p.pass_dir, "recording.bin")
@@ -174,8 +201,13 @@ def _boot_recovery(
                     )
                     state.transfer_put(req)
                     extra_transfers.append(req)
+                    _bump("decoded_iq_queued")
 
         passes_by_id[p.id] = p
+
+    if recovered_actions:
+        summary = ", ".join(f"{k}={v}" for k, v in sorted(recovered_actions.items()))
+        logger.info("boot recovery: %s", summary)
     return passes_by_id, extra_transfers
 
 

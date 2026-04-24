@@ -15,6 +15,24 @@ from .models import Pass, TransferRequest
 logger = logging.getLogger("groundstation.state")
 
 
+def _fsync_dir(path: Path) -> None:
+    """Flush a directory's entry table to disk. Without this, an fsync'd
+    file can still vanish after a power loss: the inode is durable but the
+    directory's link to it isn't, so the filename won't reappear on reboot.
+    No-op on Windows (opening a directory for fsync isn't supported there).
+    """
+    try:
+        fd = os.open(str(path), os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
 def _atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -23,14 +41,21 @@ def _atomic_write_text(path: Path, text: str) -> None:
         f.flush()
         os.fsync(f.fileno())
     os.replace(tmp, path)
+    _fsync_dir(path.parent)
 
 
 def _atomic_append_line(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    first_write = not path.exists()
     with open(path, "a", encoding="utf-8") as f:
         f.write(text.rstrip("\n") + "\n")
         f.flush()
         os.fsync(f.fileno())
+    if first_write:
+        # First append creates the file; subsequent fsyncs on an existing
+        # file already propagate size changes, but the initial dirent needs
+        # an explicit dir fsync.
+        _fsync_dir(path.parent)
 
 
 class StateStore:
@@ -80,6 +105,14 @@ class StateStore:
             except (ValidationError, json.JSONDecodeError, OSError) as e:
                 logger.warning("quarantining corrupt pass file %s: %s", f, e)
                 self._quarantine(f)
+        if results:
+            counts: Dict[str, int] = {}
+            for p in results:
+                counts[p.status.value] = counts.get(p.status.value, 0) + 1
+            summary = ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+            logger.info("state: loaded %d pass(es) — %s", len(results), summary)
+        else:
+            logger.info("state: no persisted passes")
         return results
 
     def _quarantine(self, path: Path) -> None:
@@ -112,7 +145,13 @@ class StateStore:
                     logger.warning("dropping invalid transfer queue entry: %s", err)
             elif op == "done":
                 by_id.pop(e.get("id"), None)
-        return list(by_id.values())
+        pending = list(by_id.values())
+        logger.info(
+            "state: loaded %d pending transfer(s) from %s",
+            len(pending),
+            self.transfer_queue_log.name,
+        )
+        return pending
 
     # ---------- Decode queue ----------
 
@@ -140,7 +179,13 @@ class StateStore:
                 pending[key] = True
             elif e.get("op") == "done":
                 pending.pop(key, None)
-        return list(pending.keys())
+        pending_keys = list(pending.keys())
+        logger.info(
+            "state: loaded %d pending decode(s) from %s",
+            len(pending_keys),
+            self.pending_decodes_log.name,
+        )
+        return pending_keys
 
     # ---------- Transfer completed history ----------
 

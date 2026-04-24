@@ -47,6 +47,10 @@ class DecoderService:
 
         for key in state.load_decode_queue():
             self._enqueue_persisted(key)
+        if self._in_queue:
+            logger.info(
+                "decoder: restored %d pending decode(s) from state", len(self._in_queue)
+            )
 
     def _enqueue_persisted(self, key: Tuple[str, int]) -> None:
         if key in self._in_queue:
