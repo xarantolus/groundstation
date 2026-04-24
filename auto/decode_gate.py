@@ -21,7 +21,7 @@ class DecodeGate:
 
     def __init__(
         self,
-        safety_minutes: float = 15.0,
+        safety_minutes: float = 3.0,
         clock: Callable[[], datetime.datetime] = datetime.datetime.now,
         on_change: Optional[Callable[[bool, str], None]] = None,
     ) -> None:

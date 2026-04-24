@@ -140,7 +140,7 @@ class GroundstationConfig(BaseModel):
     pass_elevation_threshold_deg: float = 5.0
     pass_start_elevation_threshold_deg: float = 5.0
     update_interval_hours: float = 2.0
-    decode_safety_minutes: float = 15.0
+    decode_safety_minutes: float = 3.0
     web_host: str = "0.0.0.0"
     web_port: int = 80
     n2yo_api_key: str | None = None
