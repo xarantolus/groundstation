@@ -41,6 +41,7 @@ class Satellite(BaseModel):
     bandwidth: float
     sample_rate: float
     lo_offset: float = 0.0
+    gain: int | None = None
     priority: int = 0
     skip_iq_upload: bool = False
     decoder: List[Decoder] = Field(default_factory=list)

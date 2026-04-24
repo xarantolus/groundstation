@@ -70,6 +70,18 @@ blocks:
     coordinate: [1264, 240.0]
     rotation: 0
     state: enabled
+- name: gain
+  id: variable
+  parameters:
+    comment: ''
+    value: int(os.getenv('GAIN', '-1'))
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1016, 56.0]
+    rotation: 0
+    state: enabled
 - name: samp_rate
   id: variable
   parameters:
@@ -176,7 +188,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1152, 120.0]
+    coordinate: [1192, 96.0]
     rotation: 0
     state: enabled
 - name: import_0_0
@@ -189,7 +201,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1248, 112.0]
+    coordinate: [1288, 88.0]
     rotation: 0
     state: enabled
 - name: import_0_1
@@ -202,7 +214,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1248, 56.0]
+    coordinate: [1288, 32.0]
     rotation: 0
     state: enabled
 - name: import_0_2
@@ -215,7 +227,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1136, 64.0]
+    coordinate: [1176, 40.0]
     rotation: 0
     state: enabled
 - name: lo_offset
@@ -462,7 +474,7 @@ blocks:
     freq7: 100e6
     freq8: 100e6
     freq9: 100e6
-    gain0: '10'
+    gain0: gain
     gain1: '10'
     gain10: '10'
     gain11: '10'
@@ -494,7 +506,7 @@ blocks:
     gain7: '10'
     gain8: '10'
     gain9: '10'
-    gain_mode0: 'True'
+    gain_mode0: gain < 0
     gain_mode1: 'False'
     gain_mode10: 'False'
     gain_mode11: 'False'

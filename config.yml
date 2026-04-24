@@ -97,6 +97,7 @@ satellites:
     norad: 43768
     frequency: 436.730e6
     bandwidth: 200e3
+    gain: 40
     sample_rate: 1.024e6
     lo_offset: 100e3
     priority: 6
@@ -112,6 +113,7 @@ satellites:
     norad: 60246
     frequency: 437.185e6
     bandwidth: 200e3
+    gain: 40
     sample_rate: 1.024e6
     lo_offset: 100e3
     priority: 6
@@ -126,6 +128,7 @@ satellites:
     norad: 62616
     frequency: 435.950e6
     bandwidth: 200e3
+    gain: 40
     sample_rate: 1.024e6
     lo_offset: 100e3
     priority: 6
@@ -140,6 +143,7 @@ satellites:
     norad: 66660
     frequency: 437.180e6
     bandwidth: 200e3
+    gain: 40
     sample_rate: 1.024e6
     lo_offset: 100e3
     priority: 6
@@ -154,6 +158,7 @@ satellites:
     norad: 43485
     frequency: 437.250e6
     bandwidth: 200e3
+    gain: 40
     sample_rate: 1.024e6
     lo_offset: 100e3
     priority: 6
@@ -168,6 +173,7 @@ satellites:
     norad: 52900
     frequency: 436.500e6
     bandwidth: 200e3
+    gain: 40
     sample_rate: 1.024e6
     lo_offset: 100e3
     priority: 6
@@ -182,6 +188,7 @@ satellites:
     norad: 63211
     frequency: 436.200e6
     bandwidth: 200e3
+    gain: 40
     sample_rate: 1.024e6
     lo_offset: 100e3
     priority: 6
@@ -196,6 +203,7 @@ satellites:
     norad: 56749
     frequency: 435.450e6
     bandwidth: 200e3
+    gain: 40
     sample_rate: 1.024e6
     lo_offset: 100e3
     priority: 6
@@ -210,6 +218,7 @@ satellites:
     norad: 56745
     frequency: 436.000e6
     bandwidth: 200e3
+    gain: 40
     sample_rate: 1.024e6
     lo_offset: 100e3
     priority: 6
@@ -224,6 +233,7 @@ satellites:
     norad: 56744
     frequency: 437.800e6
     bandwidth: 200e3
+    gain: 40
     sample_rate: 1.024e6
     lo_offset: 100e3
     priority: 6
@@ -238,6 +248,7 @@ satellites:
     norad: 43804
     frequency: 437.775e6
     bandwidth: 200e3
+    gain: 40
     sample_rate: 1.024e6
     lo_offset: 100e3
     priority: 6
@@ -252,6 +263,7 @@ satellites:
     norad: 64535
     frequency: 435.400e6
     bandwidth: 200e3
+    gain: 40
     sample_rate: 1.024e6
     lo_offset: 100e3
     priority: 6
@@ -266,6 +278,7 @@ satellites:
     norad: 64549
     frequency: 435.400e6
     bandwidth: 200e3
+    gain: 40
     sample_rate: 1.024e6
     lo_offset: 100e3
     priority: 6
@@ -280,6 +293,7 @@ satellites:
     norad: 66650
     frequency: 436.500e6
     bandwidth: 200e3
+    gain: 40
     sample_rate: 1.024e6
     lo_offset: 100e3
     priority: 4

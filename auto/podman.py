@@ -127,6 +127,8 @@ async def run_recorder(
         f"LO_OFFSET={sat.lo_offset}",
         "OUTPUT_FILE=/data/recording.bin",
     ]
+    if sat.gain is not None:
+        envs.append(f"GAIN={sat.gain}")
     cmd: List[str] = [
         "podman",
         "run",
@@ -189,6 +191,8 @@ async def run_decoder(
         f"SAMP_RATE={sat.sample_rate}",
         f"LO_OFFSET={sat.lo_offset}",
     ]
+    if sat.gain is not None:
+        envs.append(f"GAIN={sat.gain}")
     for k, v in decoder.env.items():
         envs.append(f"{k}={v}")
 
