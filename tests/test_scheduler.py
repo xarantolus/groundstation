@@ -139,6 +139,47 @@ async def test_past_predicted_pass_is_pruned(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_tle_shifted_prediction_does_not_duplicate_pass(tmp_path: Path):
+    """A fresh TLE can shift the predicted start_time by a few seconds,
+    producing a new pid for the same overpass. The scheduler must detect
+    the time-window overlap with an existing non-terminal pass and reuse
+    it, otherwise the UI shows the same overpass twice (old pid still
+    PREDICTED/RECORDING next to a freshly-spawned PREDICTED one)."""
+    cfg = _cfg(tmp_path)
+    state = StateStore(str(tmp_path / "state"))
+    bus = EventBus()
+    gate = DecodeGate(safety_minutes=15.0)
+
+    sat = cfg.satellites[0]
+    start_old = datetime.datetime.now() + datetime.timedelta(hours=1)
+    pi_old = _pi(start_old)
+    p = Pass(
+        id=Pass.make_id(sat, pi_old),
+        satellite=sat,
+        pass_info=pi_old,
+        pass_dir="/tmp/x",
+        status=PassStatus.RECORDING,
+    )
+    passes = {p.id: p}
+
+    # Fresh prediction shifts start by 2 seconds → different pid for the
+    # same overpass.
+    pi_new = _pi(start_old + datetime.timedelta(seconds=2))
+    predictor = _FakePredictor([(sat, pi_new)])
+    sched = SchedulerService(cfg, bus, state, predictor, gate, passes)
+
+    await sched._tick()
+
+    assert list(passes.keys()) == [p.id], (
+        f"expected the existing pass to be reused, got {list(passes.keys())}"
+    )
+    assert passes[p.id].status == PassStatus.RECORDING
+
+    for t in sched._monitors.values():
+        t.cancel()
+
+
+@pytest.mark.asyncio
 async def test_monitor_fires_pass_started_for_imminent_pass(tmp_path: Path):
     cfg = _cfg(tmp_path)
     state = StateStore(str(tmp_path / "state"))

@@ -125,6 +125,19 @@ class SchedulerService:
                 current_passes.append(existing)
                 self._ensure_monitor(existing)
                 continue
+            # Pass.make_id uses start_time at second-precision. A TLE refresh
+            # between ticks can shift the predicted start by a few seconds,
+            # yielding a new pid for what is logically the same overpass.
+            # Without this check we'd keep the old Pass (still PREDICTED or
+            # already RECORDING via its own monitor) AND spawn a fresh one
+            # alongside it — the UI would then show the same satellite/pass
+            # twice ("predicted" next to the live "recording" row).
+            overlap = self._find_overlapping_pass(sat, pi)
+            if overlap is not None:
+                current_ids.add(overlap.id)
+                current_passes.append(overlap)
+                self._ensure_monitor(overlap)
+                continue
             p = Pass(
                 id=pid,
                 satellite=sat,
@@ -173,6 +186,22 @@ class SchedulerService:
 
         await self._bus.publish(E.PassesTableChanged(passes=current_passes))
         self._update_gate_next_pass()
+
+    def _find_overlapping_pass(self, sat: Satellite, pi: PassInfo) -> Optional[Pass]:
+        """Return an existing non-terminal Pass for `sat` whose time window
+        overlaps `pi`. Used to absorb duplicates produced when a refreshed
+        TLE shifts start_time by a few seconds (→ new pid for the same
+        overpass). Terminal statuses are skipped so a past failed attempt
+        doesn't swallow a genuinely new prediction."""
+        for p in self._known_passes.values():
+            if p.satellite.name != sat.name:
+                continue
+            if p.status in (PassStatus.DONE, PassStatus.FAILED, PassStatus.RECORDED_PARTIAL):
+                continue
+            # Half-open interval overlap: [a.start, a.end) ∩ [b.start, b.end) ≠ ∅
+            if pi.start_time < p.pass_info.end_time and p.pass_info.start_time < pi.end_time:
+                return p
+        return None
 
     def _ensure_monitor(self, p: Pass) -> None:
         """Spawn a monitor task for `p` if one isn't already running.
