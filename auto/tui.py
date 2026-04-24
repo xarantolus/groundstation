@@ -150,9 +150,10 @@ class _TUIRenderable:
     def _pending_decoders_line(self, snap) -> Text:
         if snap.pending_decoders and not snap.decoding:
             return Text.from_markup(
-                f"[yellow]{snap.pending_decoders} decoder(s) waiting[/yellow]"
+                f"[yellow]{snap.pending_decoders} decoder(s) waiting[/yellow]",
+                justify="center",
             )
-        return Text("")
+        return Text("", justify="center")
 
     def _log_panel(self, snap) -> Panel:
         lines = [
