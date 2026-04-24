@@ -160,10 +160,6 @@ class ViewModel:
         elif isinstance(event, E.DecodeGateStateChanged):
             self.gate = GateState(open=event.open, reason=event.reason)
         elif isinstance(event, E.TransferStarted):
-            # Stat once at start so the TUI/Web summary can show total queued
-            # bytes without statting every refresh. Progress events will
-            # overwrite `total` with the actual byte count once copying begins
-            # (which may differ for items that compress before upload).
             total = 0
             try:
                 if event.source_path:

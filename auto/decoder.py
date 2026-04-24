@@ -15,8 +15,6 @@ from .state import StateStore
 from .transfer import compress_file
 
 logger = logging.getLogger("groundstation.decoder")
-# Dedicated file logger for raw container stdout/stderr — configured in
-# main._setup_logging with its own FileHandler and propagate=False.
 _decoder_output_logger = logging.getLogger("groundstation.decoders.output")
 
 

@@ -180,6 +180,72 @@ async def test_tle_shifted_prediction_does_not_duplicate_pass(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_overlapping_prediction_refreshes_predicted_pass_info(tmp_path: Path):
+    """When the new prediction overlaps an existing PREDICTED pass, the
+    scheduler should adopt the fresher pass_info so the monitor (restarted)
+    fires against the updated times. Already-in-flight passes are tested
+    separately and must NOT have their pass_info overwritten."""
+    cfg = _cfg(tmp_path)
+    state = StateStore(str(tmp_path / "state"))
+    bus = EventBus()
+    gate = DecodeGate(safety_minutes=15.0)
+
+    sat = cfg.satellites[0]
+    start_old = datetime.datetime.now() + datetime.timedelta(hours=1)
+    pi_old = _pi(start_old)
+    p = Pass(
+        id=Pass.make_id(sat, pi_old),
+        satellite=sat,
+        pass_info=pi_old,
+        pass_dir="/tmp/x",
+        status=PassStatus.PREDICTED,
+    )
+    passes = {p.id: p}
+
+    new_start = start_old + datetime.timedelta(seconds=3)
+    pi_new = _pi(new_start)
+    predictor = _FakePredictor([(sat, pi_new)])
+    sched = SchedulerService(cfg, bus, state, predictor, gate, passes)
+
+    await sched._tick()
+
+    assert list(passes.keys()) == [p.id]
+    assert passes[p.id].pass_info.start_time == new_start, (
+        "PREDICTED pass should adopt the fresher start_time on overlap"
+    )
+
+    for t in sched._monitors.values():
+        t.cancel()
+
+
+@pytest.mark.asyncio
+async def test_predicted_pass_not_persisted_to_disk(tmp_path: Path):
+    """PREDICTED passes live only in memory — the scheduler re-fetches
+    them every tick, so save_pass must skip them."""
+    cfg = _cfg(tmp_path)
+    state = StateStore(str(tmp_path / "state"))
+    bus = EventBus()
+    gate = DecodeGate(safety_minutes=15.0)
+
+    sat = cfg.satellites[0]
+    start = datetime.datetime.now() + datetime.timedelta(hours=1)
+    pi = _pi(start)
+    predictor = _FakePredictor([(sat, pi)])
+    passes: dict[str, Pass] = {}
+    sched = SchedulerService(cfg, bus, state, predictor, gate, passes)
+
+    await sched._tick()
+
+    # Pass should be in memory…
+    assert len(passes) == 1
+    # …but not on disk.
+    assert list(state.passes_dir.glob("*.json")) == []
+
+    for t in sched._monitors.values():
+        t.cancel()
+
+
+@pytest.mark.asyncio
 async def test_monitor_fires_pass_started_for_imminent_pass(tmp_path: Path):
     cfg = _cfg(tmp_path)
     state = StateStore(str(tmp_path / "state"))

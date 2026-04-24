@@ -37,10 +37,7 @@ logger = logging.getLogger("groundstation")
 
 
 def _rotate_log(path: str) -> None:
-    """Move `foo.log` → `foo.old.log` so we keep exactly the current boot's
-    log plus the previous one. Called before handlers are attached — opening
-    the new file after the rename creates it fresh. os.replace is atomic and
-    overwrites any existing `foo.old.log`."""
+    """Move `foo.log` → `foo.old.log`. Called before handlers attach."""
     if not os.path.exists(path):
         return
     old = path[:-4] + ".old.log" if path.endswith(".log") else path + ".old"
@@ -61,13 +58,11 @@ def _setup_logging() -> None:
     fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     root.addHandler(fh)
 
-    # Container stdout/stderr for decoders goes here via DecoderService.on_log.
-    # propagate=False keeps it out of tracker.log and the bus — otherwise every
-    # line would also land in the main log and the UI's main log panel.
     decoder_fh = logging.FileHandler("decoders.log", encoding="utf-8")
     decoder_fh.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
     decoder_logger = logging.getLogger("groundstation.decoders.output")
     decoder_logger.addHandler(decoder_fh)
+    # propagate=False: otherwise every decoder line also lands in tracker.log.
     decoder_logger.propagate = False
     decoder_logger.setLevel(logging.INFO)
 
@@ -154,6 +149,10 @@ def _boot_recovery(
         recovered_actions[action] = recovered_actions.get(action, 0) + 1
 
     for p in state.load_passes():
+        if p.status == PassStatus.PREDICTED:
+            state.delete_pass(p.id)
+            _bump("predicted_dropped")
+            continue
         if p.status == PassStatus.RECORDING:
             logger.warning("pass %s was RECORDING at shutdown — recovering as partial", p.id)
             partial = _recover_interrupted_pass(p, state)
@@ -272,10 +271,6 @@ async def _run(cfg: GroundstationConfig, no_tui: bool) -> None:
 
     passes_by_id, extra_transfers = _boot_recovery(cfg, state)
 
-    # Compact the JSONL logs once per boot. `_boot_recovery` may have just
-    # appended new `put` entries; compaction runs AFTER it so those are
-    # preserved. Services load the queues in their constructors below, so
-    # they'll read the compacted files.
     dropped_transfers = state.compact_transfer_queue()
     dropped_decodes = state.compact_decode_queue()
     dropped_completed = state.compact_completed(keep_last=200)

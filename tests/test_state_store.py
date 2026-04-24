@@ -40,6 +40,7 @@ def _make_pass(tmp_path: Path, name: str = "SAT") -> Pass:
         satellite=sat,
         pass_info=pi,
         pass_dir=str(tmp_path / f"recorder-{name}"),
+        status=PassStatus.RECORDED,
     )
 
 

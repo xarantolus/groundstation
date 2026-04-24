@@ -10,7 +10,7 @@ from typing import Dict, Iterable, List
 
 from pydantic import BaseModel, ValidationError
 
-from .models import Pass, TransferRequest
+from .models import Pass, PassStatus, TransferRequest
 
 logger = logging.getLogger("groundstation.state")
 
@@ -59,9 +59,7 @@ def _atomic_append_line(path: Path, text: str) -> None:
 
 
 def _atomic_rewrite_jsonl(path: Path, entries: Iterable[Dict]) -> None:
-    """Replace `path` with one JSON line per entry. Written to a sibling .tmp
-    then renamed — a crash mid-write leaves the previous (uncompacted) file
-    intact rather than a truncated one."""
+    # .tmp + rename so a crash mid-write leaves the old file intact.
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     with open(tmp, "w", encoding="utf-8") as f:
@@ -97,6 +95,8 @@ class StateStore:
     # ---------- Passes ----------
 
     def save_pass(self, p: Pass) -> None:
+        if p.status == PassStatus.PREDICTED:
+            return
         p.updated_at = datetime.datetime.now()
         path = self.passes_dir / f"{p.id}.json"
         try:
@@ -214,9 +214,6 @@ class StateStore:
     # ---------- Compaction ----------
 
     def compact_transfer_queue(self) -> int:
-        """Rewrite transfer_queue.jsonl to hold only one `put` line per open
-        request. Returns the number of lines dropped (0 if the file did not
-        exist or was already minimal)."""
         if not self.transfer_queue_log.exists():
             return 0
         before = _count_lines(self.transfer_queue_log)
@@ -234,8 +231,6 @@ class StateStore:
         return before - len(entries)
 
     def compact_decode_queue(self) -> int:
-        """Rewrite pending_decodes.jsonl to hold only one `put` line per open
-        (pass_id, decoder_index). Returns the number of lines dropped."""
         if not self.pending_decodes_log.exists():
             return 0
         before = _count_lines(self.pending_decodes_log)
@@ -254,8 +249,6 @@ class StateStore:
         return before - len(entries)
 
     def compact_completed(self, keep_last: int = 200) -> int:
-        """Truncate transfer_completed.jsonl to the last `keep_last` lines.
-        Returns the number of lines dropped."""
         if not self.transfer_completed_log.exists():
             return 0
         entries = self._read_jsonl(self.transfer_completed_log)

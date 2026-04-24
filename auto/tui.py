@@ -52,8 +52,6 @@ class _TUIRenderable:
         self._layout = Layout()
         self._layout.split(Layout(name="top", size=15), Layout(name="bottom"))
         self._layout["top"].split_row(Layout(name="passes", ratio=3), Layout(name="right", ratio=1))
-        # Borderless one-line "N decoder(s) waiting" hint sits directly under
-        # the transfers panel — size=1 reserves exactly one row for it.
         self._layout["right"].split_column(
             Layout(name="transfers"),
             Layout(name="pending_decoders", size=1),
@@ -125,8 +123,6 @@ class _TUIRenderable:
         lines = []
         if snap.active_transfers:
             count = len(snap.active_transfers)
-            # `total` is populated by ViewModel on TransferStarted (one stat)
-            # and refreshed by TransferProgress — summing here is O(count).
             total_bytes = sum(t.total for t in snap.active_transfers)
             if total_bytes > 0:
                 lines.append(f"{count} item(s) queued ({_format_bytes(total_bytes)})")
