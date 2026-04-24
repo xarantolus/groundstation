@@ -31,6 +31,14 @@ class TransferView(BaseModel):
     progress: float = 0.0  # 0..100
 
 
+class QueuedTransferView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: str
+    source_path: str
+    label: str | None = None
+
+
 class CompletedTransferView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -84,6 +92,7 @@ class ViewSnapshot(BaseModel):
     decoding: DecodingNow | None = None
     pending_decoders: int = 0
     active_transfers: List[TransferView] = Field(default_factory=list)
+    queued_transfers: List[QueuedTransferView] = Field(default_factory=list)
     completed_transfers: List[CompletedTransferView] = Field(default_factory=list)
     main_log: List[LogLine] = Field(default_factory=list)
     decoder_log: List[DecoderLogLine] = Field(default_factory=list)
@@ -104,6 +113,7 @@ class ViewModel:
         self.decoding: Optional[DecodingNow] = None
         self.decoders_pending: Set[Tuple[str, int]] = set()
         self.active_transfers: Dict[str, TransferView] = {}
+        self.queued_transfers: Dict[str, QueuedTransferView] = {}
         self.completed_transfers: Deque[CompletedTransferView] = collections.deque(
             maxlen=COMPLETED_TRANSFERS_CAPACITY
         )
@@ -159,7 +169,15 @@ class ViewModel:
             )
         elif isinstance(event, E.DecodeGateStateChanged):
             self.gate = GateState(open=event.open, reason=event.reason)
+        elif isinstance(event, E.TransferQueued):
+            req = event.request
+            self.queued_transfers[req.id] = QueuedTransferView(
+                request_id=req.id,
+                source_path=req.source_path,
+                label=req.label,
+            )
         elif isinstance(event, E.TransferStarted):
+            self.queued_transfers.pop(event.request_id, None)
             total = 0
             try:
                 if event.source_path:
@@ -191,6 +209,7 @@ class ViewModel:
                 )
         elif isinstance(event, E.TransferCompleted):
             self.active_transfers.pop(event.request_id, None)
+            self.queued_transfers.pop(event.request_id, None)
             self.completed_transfers.append(
                 CompletedTransferView(
                     request_id=event.request_id,
@@ -203,6 +222,7 @@ class ViewModel:
         elif isinstance(event, E.TransferFailed):
             if not event.will_retry:
                 self.active_transfers.pop(event.request_id, None)
+                self.queued_transfers.pop(event.request_id, None)
                 self.completed_transfers.append(
                     CompletedTransferView(
                         request_id=event.request_id,
@@ -228,6 +248,7 @@ class ViewModel:
                 decoding=self.decoding.model_copy() if self.decoding else None,
                 pending_decoders=len(self.decoders_pending),
                 active_transfers=[t.model_copy() for t in self.active_transfers.values()],
+                queued_transfers=[t.model_copy() for t in self.queued_transfers.values()],
                 completed_transfers=list(self.completed_transfers),
                 main_log=list(self.main_log),
                 decoder_log=list(self.decoder_log),

@@ -122,14 +122,22 @@ class _TUIRenderable:
     def _transfers_panel(self, snap) -> Panel:
         lines = []
         if snap.active_transfers:
-            count = len(snap.active_transfers)
-            total_bytes = sum(t.total for t in snap.active_transfers)
-            if total_bytes > 0:
-                lines.append(f"{count} item(s) queued ({_format_bytes(total_bytes)})")
-            else:
-                lines.append(f"{count} item(s) queued")
-        else:
+            for t in snap.active_transfers:
+                label = t.label or os.path.basename(t.source_path)
+                if t.total > 0:
+                    pct = max(0.0, min(100.0, t.progress))
+                    lines.append(
+                        f"[cyan]↑[/cyan] {label} "
+                        f"[bold]{pct:5.1f}%[/bold] "
+                        f"[dim]({_format_bytes(t.copied)}/{_format_bytes(t.total)})[/dim]"
+                    )
+                else:
+                    lines.append(f"[cyan]↑[/cyan] {label} [dim](starting…)[/dim]")
+        elif not snap.queued_transfers:
             lines.append("[dim]no active transfers[/dim]")
+
+        if snap.queued_transfers:
+            lines.append(f"[dim]{len(snap.queued_transfers)} queued[/dim]")
 
         if snap.completed_transfers:
             lines.append("")

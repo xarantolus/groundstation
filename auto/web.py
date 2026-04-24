@@ -55,6 +55,7 @@ class WebService:
             E.DecodeCompleted,
             E.DecodeFailed,
             E.DecodeLog,
+            E.TransferQueued,
             E.TransferStarted,
             E.TransferProgress,
             E.TransferCompleted,

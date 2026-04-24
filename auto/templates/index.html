@@ -56,6 +56,9 @@
   .xfer-bar{height:5px;background:#444;border-radius:3px;overflow:hidden}
   .xfer-fill{height:100%;background:var(--accent);transition:width .25s}
   .xfer-pct{font-size:.75em;color:var(--text2);text-align:right;margin-top:2px}
+  .xfer-size{font-size:.75em;color:var(--text2);text-align:right}
+  .xfer-queued-header{margin-top:10px;font-weight:bold;font-size:.9em;color:var(--text2)}
+  .xfer-queued{font-size:.85em;color:var(--text2);padding:2px 0;font-family:var(--mono);word-break:break-all}
   .xfer-done{font-size:.85em;color:var(--text2);padding:3px 0;border-bottom:1px solid var(--surface2)}
   .xfer-ok{color:var(--live)}.xfer-fail{color:var(--err)}
 
@@ -107,6 +110,7 @@ const state = {
   decoding: null,
   pending_decoders: 0,
   active_transfers: [],
+  queued_transfers: [],
   completed_transfers: [],
   main_log: [],
   decoder_log: [],
@@ -138,6 +142,16 @@ function fmtDurationCell(pass, now){
   return `${pass.pass_info.duration_minutes.toFixed(1)}m`;
 }
 function escapeHtml(s){return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function fmtBytes(n){
+  if (!n || n < 0) return '0 B';
+  if (n < 1024) return `${Math.round(n)} B`;
+  let v = n / 1024;
+  for (const u of ['KB','MB','GB']){
+    if (v < 1024) return `${v.toFixed(1)} ${u}`;
+    v /= 1024;
+  }
+  return `${v.toFixed(1)} TB`;
+}
 
 function renderPasses(){
   const body = document.getElementById('passes-body');
@@ -171,10 +185,23 @@ function renderTransfers(){
     for (const t of state.active_transfers){
       const pct = Math.max(0, Math.min(100, t.progress||0));
       const label = escapeHtml(t.label || t.source_path.split(/[\\/]/).pop());
-      parts.push(`<div class="xfer"><span class="xfer-label">${label}</span><div class="xfer-bar"><div class="xfer-fill" style="width:${pct}%"></div></div><div class="xfer-pct">${pct.toFixed(0)}%</div></div>`);
+      const sizeStr = t.total > 0
+        ? `${fmtBytes(t.copied)} / ${fmtBytes(t.total)}`
+        : 'starting…';
+      parts.push(`<div class="xfer"><span class="xfer-label">${label}</span><div class="xfer-bar"><div class="xfer-fill" style="width:${pct}%"></div></div><div class="xfer-pct">${pct.toFixed(1)}%</div><div class="xfer-size">${sizeStr}</div></div>`);
     }
-  } else {
+  } else if (!state.queued_transfers.length){
     parts.push('<div class="dim">No active transfers.</div>');
+  }
+  if (state.queued_transfers.length){
+    parts.push(`<div class="xfer-queued-header">Queued (${state.queued_transfers.length}):</div>`);
+    for (const q of state.queued_transfers.slice(0, 10)){
+      const label = escapeHtml(q.label || q.source_path.split(/[\\/]/).pop());
+      parts.push(`<div class="xfer-queued">⏳ ${label}</div>`);
+    }
+    if (state.queued_transfers.length > 10){
+      parts.push(`<div class="xfer-queued dim">…and ${state.queued_transfers.length - 10} more</div>`);
+    }
   }
   if (state.completed_transfers.length){
     parts.push('<div style="margin-top:10px;font-weight:bold">Recent:</div>');
@@ -239,6 +266,7 @@ function applySnapshot(snap){
   state.decoding = snap.decoding || null;
   state.pending_decoders = snap.pending_decoders || 0;
   state.active_transfers = snap.active_transfers || [];
+  state.queued_transfers = snap.queued_transfers || [];
   state.completed_transfers = snap.completed_transfers || [];
   state.main_log = snap.main_log || [];
   state.decoder_log = snap.decoder_log || [];
@@ -292,7 +320,14 @@ function applyEvent(ev){
     state.decoder_log.push(ev);
     if (state.decoder_log.length > DECODER_LOG_CAP) state.decoder_log.splice(0, state.decoder_log.length - DECODER_LOG_CAP);
     renderDecoder();
+  } else if (t === 'transfer_queued'){
+    const r = ev.request;
+    if (r && !state.queued_transfers.find(x => x.request_id === r.id)){
+      state.queued_transfers.push({request_id: r.id, source_path: r.source_path, label: r.label});
+      renderTransfers();
+    }
   } else if (t === 'transfer_started'){
+    state.queued_transfers = state.queued_transfers.filter(x => x.request_id !== ev.request_id);
     const existing = state.active_transfers.find(x => x.request_id === ev.request_id);
     if (!existing){
       state.active_transfers.push({request_id: ev.request_id, source_path: ev.source_path, destination_path: ev.destination_path, label: ev.label, copied: 0, total: 0, progress: 0});
@@ -309,12 +344,14 @@ function applyEvent(ev){
     renderTransfers();
   } else if (t === 'transfer_completed'){
     state.active_transfers = state.active_transfers.filter(x => x.request_id !== ev.request_id);
+    state.queued_transfers = state.queued_transfers.filter(x => x.request_id !== ev.request_id);
     state.completed_transfers.push({request_id: ev.request_id, source_path: ev.source_path, label: ev.label, status: 'ok', ts: ev.ts});
     if (state.completed_transfers.length > 100) state.completed_transfers.splice(0, state.completed_transfers.length - 100);
     renderTransfers();
   } else if (t === 'transfer_failed'){
     if (!ev.will_retry){
       state.active_transfers = state.active_transfers.filter(x => x.request_id !== ev.request_id);
+      state.queued_transfers = state.queued_transfers.filter(x => x.request_id !== ev.request_id);
       state.completed_transfers.push({request_id: ev.request_id, source_path: ev.source_path, label: null, status: 'fail', ts: ev.ts});
       renderTransfers();
     }

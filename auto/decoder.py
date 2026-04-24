@@ -303,6 +303,7 @@ class DecoderService:
                     logger.exception("could not remove IQ %s", iq)
             else:
                 try:
+                    await self._gate.wait_open()
                     compressed = await compress_file(iq)
                     try:
                         os.remove(iq)
