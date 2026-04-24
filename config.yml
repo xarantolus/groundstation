@@ -290,21 +290,6 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-  - name: GREENCUBE
-    norad: 53106
-    frequency: 435.310e6
-    bandwidth: 200e3
-    sample_rate: 1.024e6
-    lo_offset: 100e3
-    priority: 4
-    decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
-      - name: ax100
-        container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
-        min_size_bytes: 1
-        env:
-          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-
 
 nas_directory: /mnt/nas
 
