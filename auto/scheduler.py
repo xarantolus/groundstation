@@ -123,6 +123,7 @@ class SchedulerService:
             existing = self._known_passes.get(pid)
             if existing:
                 current_passes.append(existing)
+                self._ensure_monitor(existing)
                 continue
             p = Pass(
                 id=pid,
@@ -135,32 +136,46 @@ class SchedulerService:
             self._state.save_pass(p)
             current_passes.append(p)
             await self._bus.publish(E.PassPredicted(pass_=p))
-            self._monitors[pid] = asyncio.create_task(self._monitor_pass(p))
+            self._ensure_monitor(p)
 
-        # Prune passes that dropped out of the prediction horizon. Only
-        # remove PREDICTED (nothing has touched them yet) or terminal
-        # (DONE/FAILED) passes. Anything mid-flight is being worked on by
-        # another service that still needs the Pass object.
-        terminal = {
-            PassStatus.DONE,
-            PassStatus.FAILED,
-            PassStatus.PREDICTED,
-            PassStatus.RECORDED_PARTIAL,
-        }
+        # Prune past/terminal passes. Future PREDICTED passes that don't
+        # appear in the current prediction (e.g. a TLE fetch temporarily
+        # failed) are KEPT so we don't drop scheduled work on a transient
+        # network blip. Mid-flight passes (RECORDING, DECODING, …) are also
+        # kept — other services are still working on them.
         for dead_id in list(self._known_passes.keys()):
-            if dead_id in current_ids:
-                continue
             p = self._known_passes[dead_id]
-            if p.status in terminal:
-                self._known_passes.pop(dead_id, None)
-                task = self._monitors.pop(dead_id, None)
-                if task and not task.done():
-                    task.cancel()
-                if p.status == PassStatus.PREDICTED:
-                    self._state.delete_pass(p.id)
+            should_drop = False
+            if p.status in (PassStatus.DONE, PassStatus.FAILED, PassStatus.RECORDED_PARTIAL):
+                should_drop = True
+            elif p.status == PassStatus.PREDICTED and p.pass_info.end_time <= now:
+                # end_time already passed and we never recorded it — expire.
+                should_drop = True
+            if not should_drop:
+                continue
+            self._known_passes.pop(dead_id, None)
+            task = self._monitors.pop(dead_id, None)
+            if task and not task.done():
+                task.cancel()
+            if p.status == PassStatus.PREDICTED:
+                self._state.delete_pass(p.id)
+
+        # Every still-future PREDICTED pass (including recovered ones whose
+        # pid doesn't match the fresh prediction) must have a live monitor.
+        for p in self._known_passes.values():
+            if p.status == PassStatus.PREDICTED and p.pass_info.end_time > now:
+                self._ensure_monitor(p)
 
         await self._bus.publish(E.PassesTableChanged(passes=current_passes))
         self._update_gate_next_pass()
+
+    def _ensure_monitor(self, p: Pass) -> None:
+        """Spawn a monitor task for `p` if one isn't already running.
+        Idempotent — safe to call from every tick."""
+        existing_task = self._monitors.get(p.id)
+        if existing_task is not None and not existing_task.done():
+            return
+        self._monitors[p.id] = asyncio.create_task(self._monitor_pass(p))
 
     async def _monitor_pass(self, p: Pass) -> None:
         try:
