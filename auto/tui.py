@@ -145,12 +145,12 @@ class _TUIRenderable:
             Text(f"{l.ts.strftime('%H:%M:%S')} {l.message}", style=_level_style(l.level))
             for l in snap.main_log[-200:]
         ]
-        return Panel(Group(*lines), title="Log")
+        return Panel(_TailRenderable(lines), title="Log")
 
     def _decoder_log_panel(self, snap) -> Panel:
         lines = [
             Text(l.line, style="dim")
-            for l in snap.decoder_log[-60:]
+            for l in snap.decoder_log[-200:]
         ]
         suffix = f" · {snap.pending_decoders} waiting" if snap.pending_decoders else ""
         if snap.decoding:
@@ -160,7 +160,41 @@ class _TUIRenderable:
             )
         else:
             title = f"Decoder log{suffix}"
-        return Panel(Group(*lines), title=title, border_style="cyan")
+        return Panel(_TailRenderable(lines), title=title, border_style="cyan")
+
+
+class _TailRenderable:
+    """Renders the tail of a list of Text lines so the newest content is always
+    visible. Rich's default behavior truncates the bottom of a Group when the
+    available height is exceeded; we want the opposite — drop the oldest lines
+    and keep the panel "scrolled" to the end."""
+
+    def __init__(self, lines: list[Text]) -> None:
+        self._lines = lines
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        max_height = options.height if options.height is not None else options.max_height
+        if max_height is None or max_height <= 0 or not self._lines:
+            for line in self._lines:
+                yield line
+            return
+
+        width = options.max_width
+        # Walk from the newest line backwards, counting visual rows (accounting
+        # for wrapping), until we have enough to fill the panel.
+        visible: list[Text] = []
+        rows = 0
+        for line in reversed(self._lines):
+            cell_len = console.measure(line, options=options).maximum
+            wrapped = max(1, -(-cell_len // width)) if width > 0 else 1
+            if rows + wrapped > max_height and visible:
+                break
+            visible.append(line)
+            rows += wrapped
+            if rows >= max_height:
+                break
+        for line in reversed(visible):
+            yield line
 
 
 def _level_style(level: str) -> str:
