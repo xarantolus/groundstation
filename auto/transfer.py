@@ -170,14 +170,18 @@ class TransferService:
         except Exception as e:
             async with self._active_lock:
                 self._active.pop(req.id, None)
-            await self._handle_failure(req, original_source, working_source, e)
+            await self._handle_failure(req, original_source, working_source, working_dest, e)
             return
 
         if not req.keep_source:
-            try:
-                os.remove(working_source)
-            except OSError:
-                logger.exception("could not remove %s after upload", working_source)
+            # If we compressed, working_source (.zst) AND original_source (.bin)
+            # may both exist on disk. Clean up both.
+            for path in {working_source, original_source}:
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                except OSError:
+                    logger.exception("could not remove %s after upload", path)
 
         async with self._active_lock:
             self._active.pop(req.id, None)
@@ -213,9 +217,12 @@ class TransferService:
         req: TransferRequest,
         original_source: str,
         working_source: str,
+        working_dest: str,
         error: Exception,
     ) -> None:
         attempt = req.attempt + 1
+        compressed = working_source != original_source and os.path.exists(working_source)
+
         if attempt < MAX_ATTEMPTS:
             wait = 10 * attempt
             logger.warning(
@@ -234,12 +241,16 @@ class TransferService:
                 )
             )
             await asyncio.sleep(wait)
+            # If we already compressed successfully, retry with the compressed
+            # path directly so we don't try to re-compress a file we may have
+            # (in earlier versions) already deleted. compress=False because
+            # the work is done.
             retry = TransferRequest(
                 id=str(uuid.uuid4()),
-                source_path=original_source,
-                destination_path=req.destination_path,
+                source_path=working_source if compressed else original_source,
+                destination_path=working_dest if compressed else req.destination_path,
                 keep_source=req.keep_source,
-                compress=req.compress,
+                compress=False if compressed else req.compress,
                 attempt=attempt,
                 pass_id=req.pass_id,
                 label=req.label,
@@ -253,11 +264,13 @@ class TransferService:
             "transfer failed permanently after %d attempts: %s", MAX_ATTEMPTS, original_source
         )
         self._state.transfer_tombstone(req.id)
-        if not req.keep_source and working_source != original_source:
-            try:
-                os.remove(working_source)
-            except OSError:
-                pass
+        if not req.keep_source:
+            for path in {working_source, original_source}:
+                try:
+                    if os.path.exists(path):
+                        os.remove(path)
+                except OSError:
+                    pass
         await self._bus.publish(
             E.TransferFailed(
                 request_id=req.id,
@@ -315,7 +328,13 @@ def _copy_with_progress_sync(
 
 async def compress_file(source_path: str) -> str:
     """Stream-compresses ``source_path`` to ``.zst`` via the system ``zstd``
-    binary. Removes the source on success."""
+    binary.
+
+    Leaves the source in place — the worker removes it only after the upload
+    is confirmed. If we deleted here and the subsequent upload failed, the
+    retry would find the original file missing and drop the item, silently
+    losing data.
+    """
     compressed = source_path + ".zst"
     logger.info("compressing %s", source_path)
     proc = await asyncio.create_subprocess_exec(
@@ -334,8 +353,4 @@ async def compress_file(source_path: str) -> str:
         raise RuntimeError(
             f"zstd failed with code {proc.returncode}: {err.decode(errors='replace')}"
         )
-    try:
-        os.remove(source_path)
-    except OSError:
-        logger.exception("could not remove %s after compression", source_path)
     return compressed

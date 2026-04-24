@@ -116,22 +116,11 @@ class RecorderService:
         # starts shipping the raw IQ to the NAS immediately — in parallel with
         # decoding. keep_source=True means the decoder still reads from the
         # local file; compress=True turns it into .bin.zst on the way.
-        if p.satellite.decoder and not p.satellite.skip_iq_upload:
-            # keep_source=True so the decoder still has the local file.
-            # Compression is skipped with keep_source (would otherwise need a
-            # second on-disk copy, which violates the Pi storage constraint),
-            # so the IQ uploads uncompressed in parallel with decoding.
-            req = TransferRequest(
-                id=str(uuid.uuid4()),
-                source_path=path,
-                destination_path=self._nas_path(p, "recording.bin"),
-                keep_source=True,
-                compress=False,
-                pass_id=p.id,
-                label=f"{p.satellite.name} IQ",
-            )
-            self._state.transfer_put(req)
-            await self._bus.publish(E.TransferQueued(request=req))
+        # IQ upload happens post-decode: see DecoderService._after_all_decoders.
+        # Decoders read recording.bin directly; once they're all done the
+        # decoder service compresses it to .zst, deletes the .bin locally, and
+        # queues the much-smaller .zst for the NAS. This keeps peak disk usage
+        # low and frees the .bin as soon as its last reader finishes.
 
         # Upload the info.json so the NAS-side folder is self-describing even
         # before decoder outputs arrive.

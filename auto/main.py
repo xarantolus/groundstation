@@ -165,10 +165,11 @@ async def _run(cfg: GroundstationConfig, no_tui: bool) -> None:
 
     tasks = [asyncio.create_task(s.run(), name=type(s).__name__) for s in services]
 
-    # Extra transfers discovered during boot go on the bus now that subscribers are live
-    await asyncio.sleep(0)
-    for req in extra_transfers:
-        await bus.publish(E.TransferQueued(request=req))
+    # Recovered transfers from _boot_recovery were already persisted to state
+    # in that function. TransferService.run() loads state at startup, so
+    # republishing the event here would double-enqueue and race two workers
+    # on the same file. Nothing to do.
+    _ = extra_transfers
 
     stop_event = asyncio.Event()
 

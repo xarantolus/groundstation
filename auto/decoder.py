@@ -12,6 +12,7 @@ from .decode_gate import DecodeGate
 from .models import GroundstationConfig, IQ_DATA_FILE_EXTENSION, Pass, PassStatus, TransferRequest
 from .podman import filter_decoder_outputs, run_decoder
 from .state import StateStore
+from .transfer import compress_file
 
 logger = logging.getLogger("groundstation.decoder")
 
@@ -41,8 +42,6 @@ class DecoderService:
         self._queue: asyncio.Queue[Tuple[str, int]] = asyncio.Queue()
         self._in_queue: Set[Tuple[str, int]] = set()
         self._stop = asyncio.Event()
-        self._iq_upload_done: Dict[str, asyncio.Event] = {}
-        self._iq_upload_ok: Dict[str, bool] = {}
         self._cleanup_tasks: Set[asyncio.Task] = set()
         self._cleanup_launched: Set[str] = set()
 
@@ -58,8 +57,6 @@ class DecoderService:
     async def run(self) -> None:
         sub = self._bus.subscribe(
             E.RecordingCompleted,
-            E.TransferCompleted,
-            E.TransferFailed,
             name="decoder.events",
             queue_size=128,
         )
@@ -123,29 +120,6 @@ class DecoderService:
                     self._in_queue.add(key)
                     await self._queue.put(key)
                 await self._bus.publish(E.DecodeQueued(pass_id=p.id, decoder_index=idx))
-        elif isinstance(event, E.TransferCompleted):
-            pid = self._pass_id_for_iq_path(event.source_path)
-            if pid:
-                self._iq_upload_ok[pid] = True
-                ev = self._iq_upload_done.get(pid)
-                if ev:
-                    ev.set()
-        elif isinstance(event, E.TransferFailed):
-            if event.will_retry:
-                return
-            pid = self._pass_id_for_iq_path(event.source_path)
-            if pid:
-                self._iq_upload_ok[pid] = False
-                ev = self._iq_upload_done.get(pid)
-                if ev:
-                    ev.set()
-
-    def _pass_id_for_iq_path(self, source_path: str) -> str | None:
-        src = os.path.abspath(source_path)
-        for pid, p in self._passes.items():
-            if p.recording_path and os.path.abspath(p.recording_path) == src:
-                return pid
-        return None
 
     async def _run_one(self, pass_id: str, decoder_index: int) -> None:
         if pass_id == "__stop__":
@@ -272,45 +246,52 @@ class DecoderService:
         return done >= total
 
     async def _after_all_decoders(self, p: Pass) -> None:
-        if p.decoders_done:
-            p.status = PassStatus.DECODED
-        else:
-            p.status = PassStatus.FAILED
+        """Called exactly once per pass, when every decoder has settled.
+        The last reader of recording.bin is now gone, so we can free it.
+        If the pass's IQ is to be uploaded, compress it locally first
+        (minutes) and queue the .zst; then remove the .bin. Otherwise
+        just remove the .bin."""
+        p.status = PassStatus.DECODED if p.decoders_done else PassStatus.FAILED
         self._state.save_pass(p)
 
         iq = p.recording_path
         if iq and os.path.isfile(iq):
-            if p.satellite.skip_iq_upload:
+            if p.satellite.skip_iq_upload or not p.satellite.decoder:
                 try:
                     os.remove(iq)
+                    logger.info("removed local IQ %s (skip_iq_upload)", iq)
                 except OSError:
-                    logger.exception("could not remove skip_iq_upload IQ %s", iq)
-            elif p.satellite.decoder:
-                ok = await self._await_iq_upload(p, timeout=1800)
-                if ok:
+                    logger.exception("could not remove IQ %s", iq)
+            else:
+                try:
+                    compressed = await compress_file(iq)
                     try:
                         os.remove(iq)
+                        logger.info(
+                            "compressed IQ %s -> %s; .bin removed", iq, compressed
+                        )
                     except OSError:
-                        logger.exception("could not remove uploaded IQ %s", iq)
-                else:
-                    logger.warning(
-                        "IQ upload for %s not confirmed; leaving %s in place", p.id, iq
+                        logger.exception("could not remove IQ after compression: %s", iq)
+                    req = TransferRequest(
+                        id=str(uuid.uuid4()),
+                        source_path=compressed,
+                        destination_path=self._nas_path(p, "recording.bin.zst"),
+                        keep_source=False,
+                        compress=False,
+                        pass_id=p.id,
+                        label=f"{p.satellite.name} IQ",
+                    )
+                    self._state.transfer_put(req)
+                    await self._bus.publish(E.TransferQueued(request=req))
+                except Exception:
+                    logger.exception(
+                        "IQ compression failed for %s — leaving %s for 24h cleanup",
+                        p.id,
+                        iq,
                     )
 
         p.status = PassStatus.DONE if p.decoders_done else PassStatus.FAILED
         self._state.save_pass(p)
-        # Passes in terminal state can be dropped from the live cache but we
-        # keep the state file so the UI can show history from it.
-
-    async def _await_iq_upload(self, p: Pass, timeout: float) -> bool:
-        if p.id in self._iq_upload_ok:
-            return self._iq_upload_ok[p.id]
-        ev = self._iq_upload_done.setdefault(p.id, asyncio.Event())
-        try:
-            await asyncio.wait_for(ev.wait(), timeout=timeout)
-        except asyncio.TimeoutError:
-            return False
-        return self._iq_upload_ok.get(p.id, False)
 
     def _nas_path(self, p: Pass, *parts: str) -> str:
         prefix = os.path.join(
