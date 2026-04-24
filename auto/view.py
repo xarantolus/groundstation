@@ -220,9 +220,9 @@ class ViewModel:
                 )
             )
         elif isinstance(event, E.TransferFailed):
+            self.active_transfers.pop(event.request_id, None)
+            self.queued_transfers.pop(event.request_id, None)
             if not event.will_retry:
-                self.active_transfers.pop(event.request_id, None)
-                self.queued_transfers.pop(event.request_id, None)
                 self.completed_transfers.append(
                     CompletedTransferView(
                         request_id=event.request_id,

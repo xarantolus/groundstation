@@ -51,13 +51,6 @@ class TransferService:
         return self._active
 
     async def run(self) -> None:
-        reloaded = 0
-        for req in self._state.load_transfer_queue():
-            await self._queue.put(req)
-            reloaded += 1
-        if reloaded:
-            logger.info("transfer: queued %d recovered item(s)", reloaded)
-
         sub = self._bus.subscribe(E.TransferQueued, name="transfer.ingest", queue_size=256)
 
         async def ingest() -> None:
@@ -66,6 +59,13 @@ class TransferService:
                     await self._queue.put(event.request)
 
         self._sub_task = asyncio.create_task(ingest())
+
+        reloaded = 0
+        for req in self._state.load_transfer_queue():
+            await self._bus.publish(E.TransferQueued(request=req))
+            reloaded += 1
+        if reloaded:
+            logger.info("transfer: queued %d recovered item(s)", reloaded)
         self._workers = [
             asyncio.create_task(self._worker(i)) for i in range(self._num_workers)
         ]
@@ -264,7 +264,7 @@ class TransferService:
             # which could silently drop the work).
             self._state.transfer_put(retry)
             self._state.transfer_tombstone(req.id)
-            await self._queue.put(retry)
+            await self._bus.publish(E.TransferQueued(request=retry))
             return
 
         logger.error(
