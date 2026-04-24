@@ -55,6 +55,14 @@ class DecoderService:
         self._queue.put_nowait(key)
 
     async def run(self) -> None:
+        # Announce any items we restored from state at __init__ time so the
+        # UI's pending-count is correct. This must happen after subscribers
+        # (view, web) are running — main.py starts them before services.
+        for pass_id, idx in list(self._in_queue):
+            await self._bus.publish(
+                E.DecodeQueued(pass_id=pass_id, decoder_index=idx)
+            )
+
         sub = self._bus.subscribe(
             E.RecordingCompleted,
             name="decoder.events",
@@ -216,9 +224,13 @@ class DecoderService:
                 )
             )
         else:
-            p.decoders_done.append(decoder_index)
-            self._state.save_pass(p)
-            self._state.decode_tombstone(pass_id, decoder_index)
+            # Persist the transfer requests FIRST — before marking the
+            # decoder done and tombstoning its queue entry. A crash in the
+            # middle then leaves the decoder queue intact (work will re-run,
+            # producing the same outputs) rather than dropping the outputs
+            # entirely. Re-running a decoder is wasteful but idempotent;
+            # losing outputs is not recoverable.
+            reqs = []
             for path in surviving:
                 rel = os.path.relpath(path, p.pass_dir)
                 req = TransferRequest(
@@ -231,6 +243,13 @@ class DecoderService:
                     label=f"{p.satellite.name} {decoder_name}/{os.path.basename(path)}",
                 )
                 self._state.transfer_put(req)
+                reqs.append(req)
+
+            p.decoders_done.append(decoder_index)
+            self._state.save_pass(p)
+            self._state.decode_tombstone(pass_id, decoder_index)
+
+            for req in reqs:
                 await self._bus.publish(E.TransferQueued(request=req))
             rels = [os.path.relpath(out, p.pass_dir) for out in surviving]
             await self._bus.publish(

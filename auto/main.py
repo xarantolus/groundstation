@@ -30,6 +30,8 @@ from .tui import TUIService
 from .view import ViewModel
 from .web import WebService
 
+from typing import Optional
+
 
 logger = logging.getLogger("groundstation")
 
@@ -68,7 +70,11 @@ def _recover_interrupted_pass(
         info["interrupted_detected_at"] = datetime.datetime.now().isoformat()
         info["reason"] = "groundstation restarted during recording"
         try:
-            info_path.write_text(json.dumps(info, indent=2, default=str), encoding="utf-8")
+            # Atomic write — a crash mid-annotation on a previously valid
+            # info.json must not leave a truncated file on disk.
+            tmp = info_path.with_suffix(info_path.suffix + ".tmp")
+            tmp.write_text(json.dumps(info, indent=2, default=str), encoding="utf-8")
+            os.replace(tmp, info_path)
         except OSError:
             logger.exception("could not annotate info.json for %s", p.id)
 
@@ -93,9 +99,25 @@ def _boot_recovery(
     cfg: GroundstationConfig, state: StateStore
 ) -> tuple[Dict[str, Pass], List[TransferRequest]]:
     """Reload persisted passes and figure out what to do with each.
-    Returns the in-memory pass cache + any extra transfers to enqueue."""
+    Returns the in-memory pass cache + any extra transfers to enqueue.
+
+    Handles several crash-between-writes scenarios:
+      * RECORDING → mark partial, queue partial IQ upload
+      * RECORDED / DECODING with empty decode queue → re-enqueue decoders
+        (covers a crash between RecordingCompleted save and decoder
+        pending_decodes persistence)
+      * DECODED pass with recording.bin.zst or recording.bin still on disk
+        → queue IQ upload (covers a crash between compression and
+        transfer_put in DecoderService._after_all_decoders)
+    """
     passes_by_id: Dict[str, Pass] = {}
     extra_transfers: List[TransferRequest] = []
+
+    persisted_decode_keys = set(state.load_decode_queue())
+    persisted_transfer_sources = {
+        req.source_path for req in state.load_transfer_queue()
+    }
+
     for p in state.load_passes():
         if p.status == PassStatus.RECORDING:
             logger.warning("pass %s was RECORDING at shutdown — recovering as partial", p.id)
@@ -104,8 +126,71 @@ def _boot_recovery(
                 partial.destination_path = _nas_path(cfg, p, "recording.bin.zst")
                 state.transfer_put(partial)
                 extra_transfers.append(partial)
+
+        elif p.status in (PassStatus.RECORDED, PassStatus.DECODING):
+            missing = _missing_decoders(p, persisted_decode_keys)
+            if missing:
+                logger.warning(
+                    "pass %s in %s but %d decoder(s) missing from queue — re-enqueueing",
+                    p.id,
+                    p.status.value,
+                    len(missing),
+                )
+                for idx in missing:
+                    state.decode_put(p.id, idx)
+                    if idx not in p.decoders_pending:
+                        p.decoders_pending.append(idx)
+                state.save_pass(p)
+
+        elif p.status == PassStatus.DECODED:
+            # Post-decode IQ upload may not have been queued if we died
+            # between compression and transfer_put. Reconstruct the upload
+            # here using whatever survived on disk.
+            if not p.satellite.skip_iq_upload and p.satellite.decoder:
+                iq_zst = os.path.join(p.pass_dir, "recording.bin.zst")
+                iq_bin = os.path.join(p.pass_dir, "recording.bin")
+                chosen: Optional[str] = None
+                compress = False
+                if os.path.isfile(iq_zst) and iq_zst not in persisted_transfer_sources:
+                    chosen = iq_zst
+                    compress = False
+                elif os.path.isfile(iq_bin) and iq_bin not in persisted_transfer_sources:
+                    chosen = iq_bin
+                    compress = True
+                if chosen is not None:
+                    logger.warning(
+                        "pass %s was DECODED but IQ upload missing — queueing %s",
+                        p.id,
+                        chosen,
+                    )
+                    req = TransferRequest(
+                        id=str(uuid.uuid4()),
+                        source_path=chosen,
+                        destination_path=_nas_path(cfg, p, "recording.bin.zst"),
+                        keep_source=False,
+                        compress=compress,
+                        pass_id=p.id,
+                        label=f"{p.satellite.name} IQ (recovered)",
+                    )
+                    state.transfer_put(req)
+                    extra_transfers.append(req)
+
         passes_by_id[p.id] = p
     return passes_by_id, extra_transfers
+
+
+def _missing_decoders(p: Pass, queued: set) -> List[int]:
+    """Return the decoder indices that should be queued but aren't."""
+    total = len(p.satellite.decoder)
+    done = set(p.decoders_done) | set(p.decoders_failed)
+    missing: List[int] = []
+    for idx in range(total):
+        if idx in done:
+            continue
+        if (p.id, idx) in queued:
+            continue
+        missing.append(idx)
+    return missing
 
 
 def _nas_path(cfg: GroundstationConfig, p: Pass, *parts: str) -> str:

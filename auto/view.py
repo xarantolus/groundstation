@@ -4,7 +4,7 @@ import collections
 import datetime
 import logging
 import threading
-from typing import Deque, Dict, List, Optional
+from typing import Deque, Dict, List, Optional, Set, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -81,6 +81,7 @@ class ViewSnapshot(BaseModel):
     passes: List[Pass] = Field(default_factory=list)
     recording: str | None = None
     decoding: DecodingNow | None = None
+    pending_decoders: int = 0
     active_transfers: List[TransferView] = Field(default_factory=list)
     completed_transfers: List[CompletedTransferView] = Field(default_factory=list)
     main_log: List[LogLine] = Field(default_factory=list)
@@ -100,6 +101,7 @@ class ViewModel:
         self.passes: List[Pass] = []
         self.recording_pass_id: Optional[str] = None
         self.decoding: Optional[DecodingNow] = None
+        self.decoders_pending: Set[Tuple[str, int]] = set()
         self.active_transfers: Dict[str, TransferView] = {}
         self.completed_transfers: Deque[CompletedTransferView] = collections.deque(
             maxlen=COMPLETED_TRANSFERS_CAPACITY
@@ -131,7 +133,10 @@ class ViewModel:
             if self.recording_pass_id == event.pass_id:
                 self.recording_pass_id = None
             self._update_pass_status(event.pass_id, PassStatus.FAILED)
+        elif isinstance(event, E.DecodeQueued):
+            self.decoders_pending.add((event.pass_id, event.decoder_index))
         elif isinstance(event, E.DecodeStarted):
+            self.decoders_pending.discard((event.pass_id, event.decoder_index))
             self.decoding = DecodingNow(
                 pass_id=event.pass_id,
                 decoder_index=event.decoder_index,
@@ -139,6 +144,7 @@ class ViewModel:
             )
             self._update_pass_status(event.pass_id, PassStatus.DECODING)
         elif isinstance(event, (E.DecodeCompleted, E.DecodeFailed)):
+            self.decoders_pending.discard((event.pass_id, event.decoder_index))
             if self.decoding and self.decoding.pass_id == event.pass_id and self.decoding.decoder_index == event.decoder_index:
                 self.decoding = None
         elif isinstance(event, E.DecodeLog):
@@ -212,6 +218,7 @@ class ViewModel:
                 passes=[p.model_copy(deep=True) for p in self.passes],
                 recording=self.recording_pass_id,
                 decoding=self.decoding.model_copy() if self.decoding else None,
+                pending_decoders=len(self.decoders_pending),
                 active_transfers=[t.model_copy() for t in self.active_transfers.values()],
                 completed_transfers=list(self.completed_transfers),
                 main_log=list(self.main_log),

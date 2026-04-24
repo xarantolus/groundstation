@@ -50,11 +50,11 @@ class WebService:
             E.RecordingStarted,
             E.RecordingCompleted,
             E.RecordingFailed,
+            E.DecodeQueued,
             E.DecodeStarted,
             E.DecodeCompleted,
             E.DecodeFailed,
             E.DecodeLog,
-            E.DecodeGateStateChanged,
             E.TransferStarted,
             E.TransferProgress,
             E.TransferCompleted,
@@ -89,7 +89,9 @@ class WebService:
         payload = {"kind": "event", "event": event.model_dump(mode="json", by_alias=True)}
         message = json.dumps(payload, default=str)
         stale: List[web.WebSocketResponse] = []
-        for ws in self._sockets:
+        # Snapshot — new clients can connect mid-broadcast and mutations to
+        # the underlying list would otherwise skip/repeat entries.
+        for ws in list(self._sockets):
             if ws.closed:
                 stale.append(ws)
                 continue

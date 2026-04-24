@@ -50,18 +50,16 @@ class _TUIRenderable:
         self._view = view
         self._layout = Layout()
         self._layout.split(Layout(name="top", size=15), Layout(name="bottom"))
-        self._layout["top"].split_row(Layout(name="passes", ratio=3), Layout(name="side", ratio=1))
-        self._layout["side"].split_column(Layout(name="gate", size=3), Layout(name="transfers"))
+        self._layout["top"].split_row(Layout(name="passes", ratio=3), Layout(name="transfers", ratio=1))
         self._layout["bottom"].split_row(Layout(name="main_log"), Layout(name="decoder_log"))
 
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
         # Snapshot under the view's lock. Everything below is immutable.
         snap = self._view.snapshot()
         self._layout["passes"].update(self._passes_table(snap))
-        self._layout["gate"].update(self._gate_panel(snap))
         self._layout["transfers"].update(self._transfers_panel(snap))
         self._layout["main_log"].update(self._log_panel(snap))
-        if snap.decoding or snap.decoder_log:
+        if snap.decoding:
             self._layout["decoder_log"].visible = True
             self._layout["decoder_log"].update(self._decoder_log_panel(snap))
         else:
@@ -84,10 +82,17 @@ class _TUIRenderable:
 
         for p in display[:12]:
             start = p.pass_info.start_time.strftime("%H:%M:%S")
-            if p.pass_info.start_time < now < p.pass_info.end_time:
+            is_live = p.pass_info.start_time < now < p.pass_info.end_time
+            if is_live:
                 start = f"[bold green]{start} (LIVE)[/bold green]"
             elif p.pass_info.end_time <= now:
                 start = f"[dim]{start}[/dim]"
+            if is_live:
+                remaining = p.pass_info.end_time - now
+                total_seconds = max(0, int(remaining.total_seconds()))
+                duration_cell = f"[bold green]{total_seconds // 60}:{total_seconds % 60:02d} left[/bold green]"
+            else:
+                duration_cell = f"{p.pass_info.duration_minutes:.1f}m"
             dirs = "→".join(
                 [
                     azimuth_to_compass(p.pass_info.start_azimuth),
@@ -98,23 +103,20 @@ class _TUIRenderable:
             table.add_row(
                 p.satellite.name,
                 start,
-                f"{p.pass_info.duration_minutes:.1f}m",
+                duration_cell,
                 f"{p.pass_info.max_elevation:.1f}°",
                 dirs,
                 p.status.value,
             )
         return table
 
-    def _gate_panel(self, snap) -> Panel:
-        gate = snap.gate
-        if gate.open:
-            text = Text(f"open — {gate.reason}", style="green")
-        else:
-            text = Text(f"closed — {gate.reason}", style="yellow")
-        return Panel(text, title="Decode gate", border_style="cyan" if gate.open else "yellow")
-
     def _transfers_panel(self, snap) -> Panel:
         lines = []
+        if snap.pending_decoders and not snap.decoding:
+            lines.append(
+                f"[yellow]{snap.pending_decoders} decoder(s) waiting[/yellow]"
+            )
+            lines.append("")
         if snap.active_transfers:
             for t in snap.active_transfers:
                 label = t.label or os.path.basename(t.source_path)
@@ -150,9 +152,14 @@ class _TUIRenderable:
             Text(l.line, style="dim")
             for l in snap.decoder_log[-60:]
         ]
-        title = "Decoder log"
+        suffix = f" · {snap.pending_decoders} waiting" if snap.pending_decoders else ""
         if snap.decoding:
-            title = f"Decoder log — {snap.decoding.decoder_name or 'decoder'} ({snap.decoding.pass_id})"
+            title = (
+                f"Decoder log — {snap.decoding.decoder_name or 'decoder'} "
+                f"({snap.decoding.pass_id}){suffix}"
+            )
+        else:
+            title = f"Decoder log{suffix}"
         return Panel(Group(*lines), title=title, border_style="cyan")
 
 

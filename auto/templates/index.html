@@ -15,15 +15,25 @@
   }
   body{background:var(--bg);color:var(--text);font-family:var(--font);margin:0;padding:16px;font-size:14px}
   .grid{max-width:1400px;margin:0 auto;display:grid;grid-gap:16px;grid-template-columns:3fr 1fr;grid-template-rows:auto auto 1fr;height:calc(100vh - 32px)}
-  @media (max-width:1024px){.grid{grid-template-columns:1fr;height:auto}.card{margin-bottom:12px}}
   .card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;display:flex;flex-direction:column;overflow:hidden}
   .card h2{font-size:.95em;letter-spacing:.04em;text-transform:uppercase;color:var(--accent);margin:0 0 10px 0;border-bottom:1px solid var(--border);padding-bottom:8px;font-weight:600}
   .card-body{flex:1;overflow-y:auto}
+  .hidden{display:none !important}
   #passes{grid-column:1/2;grid-row:1/2;min-height:240px}
-  #gate{grid-column:2/3;grid-row:1/2}
-  #transfers{grid-column:2/3;grid-row:2/3}
+  #transfers{grid-column:2/3;grid-row:1/3;min-height:240px}
   #decoder{grid-column:1/2;grid-row:2/3;min-height:140px}
   #logs{grid-column:1/-1;grid-row:3/4;min-height:240px}
+
+  /* Mobile / narrow viewport: stack cards top-to-bottom as a plain flex
+     column. No grid, no fixed heights, no viewport-clipping — each card
+     sizes itself to its content and they scroll with the page. */
+  @media (max-width:1024px){
+    body{padding:10px}
+    .grid{display:flex;flex-direction:column;gap:12px;height:auto;max-width:none}
+    .card{width:auto;min-height:0;grid-column:auto;grid-row:auto}
+    #passes,#gate,#transfers,#decoder,#logs{grid-column:auto;grid-row:auto;min-height:0}
+    #decoder .card-body,#logs .card-body{max-height:40vh}
+  }
 
   table{width:100%;border-collapse:collapse;font-size:1em}
   th{text-align:left;border-bottom:1px solid var(--border);padding:6px 8px;color:var(--text2);font-weight:normal}
@@ -39,10 +49,7 @@
   .status-done{background:var(--live);color:#000}
   .status-failed{background:var(--err);color:#fff}
   .status-recorded_partial{background:var(--warn);color:#000}
-
-  .gate-box{padding:8px;border-radius:6px;font-family:var(--mono);font-size:.95em;line-height:1.4}
-  .gate-open{background:rgba(0,230,118,.1);border:1px solid var(--live);color:var(--live)}
-  .gate-closed{background:rgba(255,152,0,.08);border:1px solid var(--warn);color:var(--warn)}
+  .queue-note{color:var(--text2);font-size:.9em;padding:8px;font-family:var(--mono)}
 
   .xfer{padding:8px;background:var(--surface2);border-radius:4px;margin-bottom:6px;font-family:var(--mono);font-size:.9em}
   .xfer-label{display:block;margin-bottom:4px;font-weight:bold;word-break:break-all}
@@ -72,19 +79,14 @@
     </div>
   </section>
 
-  <section id="gate" class="card">
-    <h2>Decode gate</h2>
-    <div class="card-body"><div id="gate-body" class="gate-box dim">unknown</div></div>
-  </section>
-
   <section id="transfers" class="card">
     <h2>Transfers</h2>
     <div class="card-body" id="transfers-body"><div class="dim">Connecting…</div></div>
   </section>
 
-  <section id="decoder" class="card">
+  <section id="decoder" class="card hidden">
     <h2 id="decoder-title">Decoder log</h2>
-    <div class="card-body decoder-log" id="decoder-body"><span class="dim">idle</span></div>
+    <div class="card-body decoder-log" id="decoder-body"></div>
   </section>
 
   <section id="logs" class="card">
@@ -103,12 +105,13 @@ const state = {
   passes: [],
   recording: null,
   decoding: null,
+  pending_decoders: 0,
   active_transfers: [],
   completed_transfers: [],
   main_log: [],
   decoder_log: [],
-  gate: {open:true, reason:""},
 };
+const pendingKeys = new Set();   // "pass_id#idx" — authoritative pending set on the client
 
 function fmtTime(iso){
   const d = new Date(iso);
@@ -122,6 +125,17 @@ function fmtStartDisplay(pass, now){
   if (start < now && end > now) return base + " (LIVE)";
   if (end <= now) return base + " (ended)";
   return base;
+}
+function fmtDurationCell(pass, now){
+  const start = new Date(pass.pass_info.start_time);
+  const end = new Date(pass.pass_info.end_time);
+  if (start < now && end > now){
+    const remainingMs = end - now;
+    const m = Math.floor(remainingMs / 60000);
+    const s = Math.max(0, Math.floor((remainingMs % 60000) / 1000));
+    return `${m}:${String(s).padStart(2,'0')} left`;
+  }
+  return `${pass.pass_info.duration_minutes.toFixed(1)}m`;
 }
 function escapeHtml(s){return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 
@@ -139,20 +153,15 @@ function renderPasses(){
     const isPast = end <= now;
     const cls = isLive ? "live" : (isPast ? "past" : "");
     const startStr = fmtStartDisplay(p, now);
+    const durationStr = fmtDurationCell(p, now);
     const dir = [compass(p.pass_info.start_azimuth), compass(p.pass_info.max_azimuth), compass(p.pass_info.end_azimuth)].join("→");
     const norad = p.satellite.norad;
     const name = escapeHtml(p.satellite.name);
     const nameHtml = norad ? `<a href="https://www.n2yo.com/satellite/?s=${encodeURIComponent(norad)}" target="_blank" rel="noreferrer">${name}</a>` : name;
     const status = escapeHtml(p.status);
-    return `<tr class="${cls}"><td>${nameHtml}</td><td>${escapeHtml(startStr)}</td><td>${p.pass_info.duration_minutes.toFixed(1)}m</td><td>${p.pass_info.max_elevation.toFixed(1)}°</td><td>${dir}</td><td><span class="status-pill status-${status}">${status}</span></td></tr>`;
+    return `<tr class="${cls}"><td>${nameHtml}</td><td>${escapeHtml(startStr)}</td><td>${escapeHtml(durationStr)}</td><td>${p.pass_info.max_elevation.toFixed(1)}°</td><td>${dir}</td><td><span class="status-pill status-${status}">${status}</span></td></tr>`;
   });
   body.innerHTML = rows.join("");
-}
-
-function renderGate(){
-  const el = document.getElementById('gate-body');
-  el.className = 'gate-box ' + (state.gate.open ? 'gate-open' : 'gate-closed');
-  el.textContent = (state.gate.open ? 'OPEN — ' : 'CLOSED — ') + (state.gate.reason || '(unknown)');
 }
 
 function renderTransfers(){
@@ -180,21 +189,36 @@ function renderTransfers(){
 }
 
 function renderDecoder(){
+  const card = document.getElementById('decoder');
   const title = document.getElementById('decoder-title');
   const body = document.getElementById('decoder-body');
+
   if (state.decoding){
+    card.classList.remove('hidden');
     const d = state.decoding;
-    title.textContent = `Decoder log — ${d.decoder_name || 'decoder'} (${d.pass_id})`;
-  } else {
-    title.textContent = 'Decoder log';
-  }
-  if (!state.decoder_log.length){
-    body.innerHTML = '<span class="dim">idle</span>';
+    const waiting = state.pending_decoders > 0 ? ` · ${state.pending_decoders} waiting` : '';
+    title.textContent = `Decoder log — ${d.decoder_name || 'decoder'} (${d.pass_id})${waiting}`;
+    if (!state.decoder_log.length){
+      body.textContent = '';
+    } else {
+      body.textContent = state.decoder_log.slice(-120).map(l => l.line).join('\n');
+      body.scrollTop = body.scrollHeight;
+    }
     return;
   }
-  const lines = state.decoder_log.slice(-120).map(l => escapeHtml(l.line));
-  body.textContent = lines.join('\n');
-  body.scrollTop = body.scrollHeight;
+
+  // Not currently decoding. Show a small "N waiting" note if the queue has
+  // items, otherwise hide the card entirely.
+  if (state.pending_decoders > 0){
+    card.classList.remove('hidden');
+    title.textContent = 'Decoders';
+    const n = state.pending_decoders;
+    body.innerHTML = `<div class="queue-note">${n} decoder${n === 1 ? '' : 's'} waiting in queue</div>`;
+    return;
+  }
+
+  card.classList.add('hidden');
+  body.textContent = '';
 }
 
 function renderLogs(){
@@ -213,11 +237,12 @@ function applySnapshot(snap){
   state.passes = snap.passes || [];
   state.recording = snap.recording || null;
   state.decoding = snap.decoding || null;
+  state.pending_decoders = snap.pending_decoders || 0;
   state.active_transfers = snap.active_transfers || [];
   state.completed_transfers = snap.completed_transfers || [];
   state.main_log = snap.main_log || [];
   state.decoder_log = snap.decoder_log || [];
-  state.gate = snap.gate || {open:true, reason:""};
+  pendingKeys.clear();
   renderAll();
 }
 
@@ -240,11 +265,25 @@ function applyEvent(ev){
   } else if (t === 'recording_failed'){
     if (state.recording === ev.pass_id) state.recording = null;
     setPassStatus(ev.pass_id, 'failed'); renderPasses();
+  } else if (t === 'decode_queued'){
+    const k = `${ev.pass_id}#${ev.decoder_index}`;
+    if (!pendingKeys.has(k)){
+      pendingKeys.add(k);
+      state.pending_decoders = pendingKeys.size;
+    }
+    renderDecoder();
   } else if (t === 'decode_started'){
+    const k = `${ev.pass_id}#${ev.decoder_index}`;
+    pendingKeys.delete(k);
+    state.pending_decoders = pendingKeys.size;
     state.decoding = {pass_id: ev.pass_id, decoder_index: ev.decoder_index, decoder_name: ev.decoder_name};
+    state.decoder_log = [];  // fresh log per decoder run
     setPassStatus(ev.pass_id, 'decoding');
     renderDecoder(); renderPasses();
   } else if (t === 'decode_completed' || t === 'decode_failed'){
+    const k = `${ev.pass_id}#${ev.decoder_index}`;
+    pendingKeys.delete(k);
+    state.pending_decoders = pendingKeys.size;
     if (state.decoding && state.decoding.pass_id === ev.pass_id && state.decoding.decoder_index === ev.decoder_index){
       state.decoding = null;
     }
@@ -253,9 +292,6 @@ function applyEvent(ev){
     state.decoder_log.push(ev);
     if (state.decoder_log.length > DECODER_LOG_CAP) state.decoder_log.splice(0, state.decoder_log.length - DECODER_LOG_CAP);
     renderDecoder();
-  } else if (t === 'decode_gate_state_changed'){
-    state.gate = {open: ev.open, reason: ev.reason};
-    renderGate();
   } else if (t === 'transfer_started'){
     const existing = state.active_transfers.find(x => x.request_id === ev.request_id);
     if (!existing){
@@ -294,7 +330,7 @@ function setPassStatus(pass_id, status){
   if (p) p.status = status;
 }
 
-function renderAll(){ renderPasses(); renderGate(); renderTransfers(); renderDecoder(); renderLogs(); }
+function renderAll(){ renderPasses(); renderTransfers(); renderDecoder(); renderLogs(); }
 
 let ws;
 let retry = 500;

@@ -255,8 +255,12 @@ class TransferService:
                 pass_id=req.pass_id,
                 label=req.label,
             )
-            self._state.transfer_tombstone(req.id)
+            # Put retry first, THEN tombstone the original. A crash between
+            # these two lines leaves both entries in state — the retry wins
+            # on reload, so the work is preserved (vs. the reverse order
+            # which could silently drop the work).
             self._state.transfer_put(retry)
+            self._state.transfer_tombstone(req.id)
             await self._queue.put(retry)
             return
 

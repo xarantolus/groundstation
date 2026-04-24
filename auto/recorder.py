@@ -85,6 +85,12 @@ class RecorderService:
         loop = asyncio.get_running_loop()
 
         def on_log(line: str) -> None:
+            # Also push through the standard logger so it lands in the main
+            # log panel + tracker.log — matching the pre-refactor behaviour
+            # where recorder stdout was visible in the web/TUI log.
+            stripped = line.rstrip("\n")
+            if stripped:
+                logger.info("Recorder: %s", stripped)
             loop.create_task(
                 self._bus.publish(E.RecordingLog(pass_id=p.id, line=line))
             )
