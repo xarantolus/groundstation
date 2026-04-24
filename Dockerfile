@@ -111,12 +111,8 @@ RUN --mount=type=cache,target=/tmp/gr-satellites \
 	make install && \
 	ldconfig
 
-COPY auto/requirements.txt /tmp/requirements.txt
-
 RUN --mount=type=cache,target=/root/.cache/pip \
-	pip3 install matplotlib numpy scipy && \
-	pip3 install -r /tmp/requirements.txt && \
-	rm -rf /tmp/requirements.txt
+	pip3 install matplotlib numpy scipy
 
 # Ensures that the osmosdr .so files are found
 ENV LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib64

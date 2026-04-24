@@ -214,7 +214,8 @@ async def run_decoder(
 
 def filter_decoder_outputs(output_dir: str, decoder: Decoder) -> List[str]:
     """Apply min_size_bytes/min_files policy. Returns the surviving file list.
-    Mirrors the existing external.py behavior so decoder contracts stay identical."""
+    Enforces decoder.min_size_bytes / min_files to drop runs that produced
+    nothing usable."""
     if not os.path.isdir(output_dir):
         return []
     if decoder.min_size_bytes > 0:

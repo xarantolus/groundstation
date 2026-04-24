@@ -138,4 +138,4 @@ cd ..
 
 cd .. # leave decoders
 
-python -m pip install -r auto/requirements.txt --break-system-packages
+uv sync
