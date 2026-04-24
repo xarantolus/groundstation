@@ -1,471 +1,341 @@
-from typing import Tuple, Dict, Any, Optional, Callable, List, Set
+from __future__ import annotations
+
+import asyncio
+import collections
 import logging
 import os
-import pickle
-import asyncio
 import time
-import collections
+import uuid
+from typing import Callable, Deque, Dict, List, Optional
 
-from common import IQ_DATA_FILE_EXTENSION
+from . import events as E
+from .bus import EventBus
+from .models import GroundstationConfig, IQ_DATA_FILE_EXTENSION, TransferRequest
+from .state import StateStore
 
-# Type alias for a transfer item: (source_path, destination_path, attempt_nr, keep_source)
-# keep_source=True means: don't compress, and don't delete source after upload
-# (used when another process — e.g. the decoder — still needs the local file).
-TransferItem = Tuple[str, str, int, bool]
+logger = logging.getLogger("groundstation.transfer")
 
-
-def _normalize_item(item: tuple) -> TransferItem:
-    """Normalizes legacy 3-tuple items loaded from older pickle state."""
-    if len(item) >= 4:
-        return (item[0], item[1], item[2], bool(item[3]))
-    src, dst, attempt = item
-    return (src, dst, attempt, False)
+MAX_ATTEMPTS = 3
 
 
-class TransferQueueManager:
-    # ...
-    def __init__(self, state_file_path: str = "transfer_queue.state"):
-        self.state_file_path = state_file_path
-        self._queue: asyncio.Queue[TransferItem] = asyncio.Queue()
-        self._items: List[TransferItem] = []  # Internal tracking of queue items
-        self._lock = asyncio.Lock()  # For async thread-safety
+class TransferService:
+    """Event-driven transfer worker pool.
 
-        # Active transfers for progress reporting: {source_path: {"progress": float, "total": int, "current": int}}
-        self.active_transfers: Dict[str, Dict[str, Any]] = {}
-        self.completed_transfers = collections.deque(
-            maxlen=10
-        )  # Track last 10 completed
-        # Source paths that have finished uploading successfully — used so callers
-        # (e.g. the decoder pipeline) can know when it's safe to delete a
-        # keep_source file locally.
-        self.succeeded_uploads: Set[str] = set()
-        self.on_progress_update: Optional[Callable[[], None]] = None
+    Subscribes to TransferQueued, emits TransferStarted/Progress/Completed/Failed.
+    Persists the queue as a JSONL log (via StateStore). Uploads resume in-place
+    against partial NAS-side files — see :func:`copy_with_progress`.
+    """
 
-        # Load any previously queued items at startup
-        # Note: _load_state is sync but that's fine for init
-        self._load_state()
-
-    def add_completed_transfer(self, filename: str, status: str = "Completed"):
-        """Adds a completed transfer to the history"""
-        self.completed_transfers.append(
-            {"filename": filename, "status": status, "time": time.time()}
-        )
-        if self.on_progress_update:
-            self.on_progress_update()
-
-
-
-    async def add_item(
+    def __init__(
         self,
-        source_path: str,
-        destination_path: str,
-        attempt_nr: int = 0,
-        keep_source: bool = False,
-    ) -> bool:
-        """Add an item to the transfer queue and update state file"""
-        item: TransferItem = (source_path, destination_path, attempt_nr, keep_source)
+        cfg: GroundstationConfig,
+        bus: EventBus,
+        state: StateStore,
+        num_workers: int = 4,
+    ) -> None:
+        self._cfg = cfg
+        self._bus = bus
+        self._state = state
+        self._num_workers = num_workers
+        self._queue: asyncio.Queue[TransferRequest] = asyncio.Queue()
+        self._stop = asyncio.Event()
+        self._workers: List[asyncio.Task] = []
+        self._sub_task: Optional[asyncio.Task] = None
 
-        async with self._lock:
-            await self._queue.put(item)
-            if item not in self._items:
-                self._items.append(item)
-                self._save_state()
+        self._active: Dict[str, E.TransferProgress] = {}
+        self._completed_tail: Deque[E.TransferCompleted] = collections.deque(maxlen=50)
+        self._active_lock = asyncio.Lock()
 
-        logging.debug(
-            f"Added to transfer queue: {os.path.basename(source_path)} -> {destination_path}"
+    @property
+    def active(self) -> Dict[str, E.TransferProgress]:
+        return self._active
+
+    async def run(self) -> None:
+        for req in self._state.load_transfer_queue():
+            await self._queue.put(req)
+        logger.info("transfer: reloaded %d persisted items", self._queue.qsize())
+
+        sub = self._bus.subscribe(E.TransferQueued, name="transfer.ingest", queue_size=256)
+
+        async def ingest() -> None:
+            async for event in sub:
+                if isinstance(event, E.TransferQueued):
+                    await self._queue.put(event.request)
+
+        self._sub_task = asyncio.create_task(ingest())
+        self._workers = [
+            asyncio.create_task(self._worker(i)) for i in range(self._num_workers)
+        ]
+        try:
+            await self._stop.wait()
+        finally:
+            for w in self._workers:
+                w.cancel()
+            if self._sub_task:
+                self._sub_task.cancel()
+            for t in [*self._workers, self._sub_task]:
+                if t is None:
+                    continue
+                try:
+                    await t
+                except asyncio.CancelledError:
+                    pass
+            sub.close()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    async def _worker(self, worker_id: int) -> None:
+        loop = asyncio.get_running_loop()
+        while not self._stop.is_set():
+            try:
+                req = await self._queue.get()
+            except asyncio.CancelledError:
+                raise
+            try:
+                await self._process(req, loop)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("worker %d: unhandled error", worker_id)
+
+    async def _process(self, req: TransferRequest, loop: asyncio.AbstractEventLoop) -> None:
+        original_source = req.source_path
+        if not os.path.exists(original_source):
+            logger.warning("source missing, dropping transfer: %s", original_source)
+            self._state.transfer_tombstone(req.id)
+            await self._bus.publish(
+                E.TransferFailed(
+                    request_id=req.id,
+                    source_path=original_source,
+                    error="source file missing",
+                    will_retry=False,
+                )
+            )
+            return
+
+        await self._bus.publish(
+            E.TransferStarted(
+                request_id=req.id,
+                source_path=original_source,
+                destination_path=req.destination_path,
+                label=req.label,
+            )
         )
-        return True
 
-    async def wait_for_upload(
-        self, source_path: str, timeout: float = 1800
-    ) -> bool:
-        """Waits until ``source_path`` is no longer queued or being uploaded.
+        working_source = original_source
+        working_dest = req.destination_path
 
-        Returns True if the upload succeeded, False if it was given up on or
-        the timeout elapsed.
-        """
-        start = time.time()
-        while time.time() - start < timeout:
-            async with self._lock:
-                in_queue = any(i[0] == source_path for i in self._items)
-            in_active = source_path in self.active_transfers
-            if not in_queue and not in_active:
-                return source_path in self.succeeded_uploads
-            await asyncio.sleep(2)
-        return source_path in self.succeeded_uploads
+        if req.compress and working_source.endswith(IQ_DATA_FILE_EXTENSION) and not req.keep_source:
+            try:
+                working_source = await compress_file(working_source)
+                if not working_dest.endswith(".zst"):
+                    working_dest = working_dest + ".zst"
+            except Exception as e:
+                logger.error("compression failed for %s: %s — uploading raw", original_source, e)
 
-    async def get_next_item(self) -> TransferItem:
-        """Get the next item from the queue (doesn't modify state file)"""
-        return await self._queue.get()
+        async def report(copied: int, total: int) -> None:
+            progress = E.TransferProgress(
+                request_id=req.id,
+                source_path=original_source,
+                copied=copied,
+                total=total,
+            )
+            async with self._active_lock:
+                self._active[req.id] = progress
+            await self._bus.publish(progress)
 
-    def task_done(self) -> None:
-        """Mark task as done"""
-        self._queue.task_done()
+        # Throttle progress updates to ~4 Hz plus terminal points. Without
+        # this, a 1 GB file at 50 MB/s would fire 30k+ bus events.
+        last_emit = [0.0]
+        last_copied = [0]
 
-    async def update_item(self, old_item: TransferItem, new_item: TransferItem) -> bool:
-        """Update an item in the queue (e.g., when compressing files)"""
-        async with self._lock:
-            if old_item in self._items:
-                self._items.remove(old_item)
+        def throttled(copied: int, total: int) -> None:
+            now = time.monotonic()
+            is_last = total > 0 and copied >= total
+            if not is_last and now - last_emit[0] < 0.25 and copied - last_copied[0] < (1 << 20):
+                return
+            last_emit[0] = now
+            last_copied[0] = copied
+            asyncio.run_coroutine_threadsafe(report(copied, total), loop)
 
-            self._items.append(new_item)
-            # Re-queueing logic is tricky because we peeled it off via get_next_item.
-            # In the original code, update_item was called while holding the item.
-            # The worker calls update_item.
-            # Since the worker hasn't called task_done/finished yet, the item is technically "in progress".
-            # But the worker wants to continue processing `new_item` immediately?
-            # Actually, the original worker code:
-            #   get_next_item -> doing stuff -> update_item -> continue processing (with new vars)
-            #   original update_item also put it back in queue?
-            #   "self._queue.put(new_item)"
-            # Wait, if we put it back in queue, another worker (if multiple) could pick it up.
-            # But we only have one worker.
-            # If we put it back in queue, the CURRENT worker loop will treat it as a new item in next iteration?
-            # No, the current worker already has `source_path` updated.
-            # Re-reading original Code:
-            #   transfer_queue.update_item(old_item, new_item)
-            #   ...
-            #   source_path = compressed_path
-            # The worker continues with the new path.
-            # But update_item puts it in queue.
-            # So it would be processed AGAIN?
-            # Original code: `self._queue.put(new_item)`. Yes.
-            # But the worker continues to process `source_path = compressed_path`.
-            # So it processes it, finishes, calls process_done.
-            # THEN, it loops around, gets the item we just put back?
-            # Duplicate transfer?
-            # Actually, `remove_item` is called at the end with `original_source_path`?
-            # "transfer_queue.remove_item((original_source_path, ...))"
-            # This is messy.
+        try:
+            await loop.run_in_executor(
+                None,
+                _copy_with_progress_sync,
+                working_source,
+                working_dest,
+                throttled,
+            )
+        except Exception as e:
+            async with self._active_lock:
+                self._active.pop(req.id, None)
+            await self._handle_failure(req, original_source, working_source, e)
+            return
 
-            # Let's fix this logic. We shouldn't re-queue if we are continuing to process it.
-            # But we want to persist the state change in case of crash.
-            # So just update `self._items` and save state.
+        if not req.keep_source:
+            try:
+                os.remove(working_source)
+            except OSError:
+                logger.exception("could not remove %s after upload", working_source)
+
+        async with self._active_lock:
+            self._active.pop(req.id, None)
+        self._state.transfer_tombstone(req.id)
+
+        event = E.TransferCompleted(
+            request_id=req.id,
+            source_path=original_source,
+            destination_path=working_dest,
+            label=req.label,
+        )
+        self._completed_tail.append(event)
+        self._state.record_completed(
+            {
+                "id": req.id,
+                "source": original_source,
+                "dest": working_dest,
+                "label": req.label,
+                "ts": event.ts.isoformat(),
+            }
+        )
+        await self._bus.publish(event)
+
+        try:
+            parent = os.path.dirname(working_source)
+            if parent and os.path.isdir(parent) and not os.listdir(parent):
+                os.rmdir(parent)
+        except OSError:
             pass
-            self._save_state()
 
-        return True
+    async def _handle_failure(
+        self,
+        req: TransferRequest,
+        original_source: str,
+        working_source: str,
+        error: Exception,
+    ) -> None:
+        attempt = req.attempt + 1
+        if attempt < MAX_ATTEMPTS:
+            wait = 10 * attempt
+            logger.warning(
+                "transfer failed (%s). retry %d/%d in %ds",
+                error,
+                attempt,
+                MAX_ATTEMPTS,
+                wait,
+            )
+            await self._bus.publish(
+                E.TransferFailed(
+                    request_id=req.id,
+                    source_path=original_source,
+                    error=str(error),
+                    will_retry=True,
+                )
+            )
+            await asyncio.sleep(wait)
+            retry = TransferRequest(
+                id=str(uuid.uuid4()),
+                source_path=original_source,
+                destination_path=req.destination_path,
+                keep_source=req.keep_source,
+                compress=req.compress,
+                attempt=attempt,
+                pass_id=req.pass_id,
+                label=req.label,
+            )
+            self._state.transfer_tombstone(req.id)
+            self._state.transfer_put(retry)
+            await self._queue.put(retry)
+            return
 
-    async def remove_item(self, item: TransferItem) -> bool:
-        """Remove an item from the tracking list and update state file"""
-        async with self._lock:
-            if item in self._items:
-                self._items.remove(item)
-                self._save_state()
-                return True
-
-        return False
-
-    def _save_state(self) -> None:
-        """Save the current queue state to a file (internal use)"""
-        try:
-            with open(self.state_file_path, "wb") as f:
-                pickle.dump(self._items, f)
-
-            logging.debug(f"Saved transfer queue state: {len(self._items)} items")
-        except Exception as e:
-            logging.error(f"Failed to save transfer queue state: {e}")
-
-    def _load_state(self) -> None:
-        """Load the queue state from file if it exists (internal use)"""
-        try:
-            if os.path.exists(self.state_file_path):
-                with open(self.state_file_path, "rb") as f:
-                    raw_items = pickle.load(f)
-
-                # Migrate any legacy 3-tuples to the new 4-tuple shape
-                self._items = [_normalize_item(i) for i in raw_items]
-
-                for item in self._items:
-                    self._queue.put_nowait(item)
-
-                logging.info(f"Loaded transfer queue state: {len(self._items)} items")
-        except Exception as e:
-            logging.error(f"Failed to load transfer queue state: {e}")
-
-    async def update_progress(self, source_path: str, current: int, total: int) -> None:
-        """Update progress for an active transfer"""
-        # No need for lock for simple dict update, but good for consistency
-        async with self._lock:
-            if total > 0:
-                progress = (current / total) * 100
-                self.active_transfers[source_path] = {
-                    "current": current,
-                    "total": total,
-                    "progress": progress,
-                }
-            else:
-                self.active_transfers[source_path] = {
-                    "current": current,
-                    "total": total,
-                    "progress": 0,
-                }
-
-            # Callback might be sync (RichTUI update)
-            if self.on_progress_update:
-                self.on_progress_update()
-
-    async def end_transfer(self, source_path: str) -> None:
-        """Remove a transfer from active tracking"""
-        async with self._lock:
-            if source_path in self.active_transfers:
-                del self.active_transfers[source_path]
-            if self.on_progress_update:
-                self.on_progress_update()
+        logger.error(
+            "transfer failed permanently after %d attempts: %s", MAX_ATTEMPTS, original_source
+        )
+        self._state.transfer_tombstone(req.id)
+        if not req.keep_source and working_source != original_source:
+            try:
+                os.remove(working_source)
+            except OSError:
+                pass
+        await self._bus.publish(
+            E.TransferFailed(
+                request_id=req.id,
+                source_path=original_source,
+                error=str(error),
+                will_retry=False,
+            )
+        )
 
 
-def copy_with_progress(
+def _copy_with_progress_sync(
     src: str,
     dst: str,
-    manager: TransferQueueManager,
-    loop: asyncio.AbstractEventLoop,
-    buffer_size: int = 32 * 1024,
+    report: Callable[[int, int], None],
+    buffer_size: int = 64 * 1024,
 ) -> None:
-    """Copies a file while reporting progress to the manager. Runs in thread executor.
-
-    Resumes from a partial ``dst`` if one is already present and smaller than
-    ``src``. This lets a reboot mid-upload continue rather than retransfer the
-    entire IQ recording over the slow NAS link.
-    """
-    total_size = os.path.getsize(src)
-
+    """Resumable byte copy. Picks up partial dst files to minimise re-transfer
+    over slow NAS links — critical if the Pi reboots mid-upload."""
+    total = os.path.getsize(src)
     os.makedirs(os.path.dirname(dst), exist_ok=True)
 
     start_offset = 0
     if os.path.exists(dst):
         existing = os.path.getsize(dst)
-        if 0 < existing < total_size:
+        if existing == total:
+            report(total, total)
+            return
+        if existing > total:
+            raise OSError(
+                f"destination larger than source ({existing} > {total}); refusing to overwrite"
+            )
+        if existing > 0:
             start_offset = existing
-            logging.info(
-                f"Resuming upload of {os.path.basename(src)} "
-                f"from {start_offset / (1024 * 1024):.1f} MB / {total_size / (1024 * 1024):.1f} MB"
+            logger.info(
+                "resuming upload of %s from %.1f MB / %.1f MB",
+                os.path.basename(src),
+                start_offset / (1024 * 1024),
+                total / (1024 * 1024),
             )
 
     copied = start_offset
     open_mode = "ab" if start_offset > 0 else "wb"
-
-    def report_progress(c, t):
-        asyncio.run_coroutine_threadsafe(manager.update_progress(src, c, t), loop)
-
     with open(src, "rb") as fsrc, open(dst, open_mode) as fdst:
         if start_offset > 0:
             fsrc.seek(start_offset)
-            report_progress(copied, total_size)
+            report(copied, total)
         while True:
             buf = fsrc.read(buffer_size)
             if not buf:
                 break
             fdst.write(buf)
             copied += len(buf)
-            report_progress(copied, total_size)
+            report(copied, total)
 
 
 async def compress_file(source_path: str) -> str:
-    """Compresses file using zstd in a subprocess"""
-    compressed_path = source_path + ".zst"
-    logging.info(f"Compressing {source_path}...")
-
+    """Stream-compresses ``source_path`` to ``.zst`` via the system ``zstd``
+    binary. Removes the source on success."""
+    compressed = source_path + ".zst"
+    logger.info("compressing %s", source_path)
     proc = await asyncio.create_subprocess_exec(
         "zstd",
         "--no-progress",
         "-9",
         "-f",
-        "-v",
         source_path,
         "-o",
-        compressed_path,
-        stdout=asyncio.subprocess.PIPE,
+        compressed,
+        stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.PIPE,
     )
-    await proc.communicate()
-
+    _, err = await proc.communicate()
     if proc.returncode != 0:
-        raise RuntimeError(f"zstd failed with return code {proc.returncode}")
-
-    logging.info(f"Compressed {source_path} to {compressed_path}")
-    os.remove(source_path)
-    return compressed_path
-
-
-async def file_transfer_worker(transfer_queue: TransferQueueManager):
-    """Worker task that processes file transfers."""
-    loop = asyncio.get_running_loop()
-
-    while True:
-        source_path = ""
-        destination_path = ""
-        attempt_nr = 0
-        keep_source = False
-        try:
-            item = await transfer_queue.get_next_item()
-            item = _normalize_item(item)
-            source_path, destination_path, attempt_nr, keep_source = item
-            original_item = item
-            original_source_path = source_path
-            original_destination_path = destination_path
-
-            # Skip files that don't exist anymore
-            if not os.path.exists(source_path):
-                logging.warning(
-                    f"Source file no longer exists: {source_path}. Skipping transfer."
-                )
-                await transfer_queue.remove_item(item)
-                transfer_queue.task_done()
-                continue
-
-            # Compression — skipped for keep_source items because compression
-            # deletes the source and we need it available for the decoder.
-            if source_path.endswith(IQ_DATA_FILE_EXTENSION) and not keep_source:
-                try:
-                    compressed_path = await compress_file(source_path)
-
-                    # Update entry in queue (persist state)
-                    # Note: We are NOT putting it back in queue to be picked up again, just updating tracking
-                    new_item: TransferItem = (
-                        compressed_path,
-                        destination_path + ".zst",
-                        attempt_nr,
-                        keep_source,
-                    )
-                    await transfer_queue.update_item(item, new_item)
-
-                    source_path = compressed_path
-                    destination_path = destination_path + ".zst"
-                except Exception as e:
-                    logging.error(
-                        f"Error compressing {source_path} - uploading anyways: {e}"
-                    )
-
-            # File Transfer with Retry
-            file_size_bytes = os.path.getsize(source_path)
-            file_size_mb = file_size_bytes / (1024 * 1024)
-
-            logging.info(
-                f"Starting file transfer to NAS: {os.path.basename(destination_path)} | Size: {file_size_mb:.2f} MB"
-                + (f" | Attempt: {attempt_nr + 1}" if attempt_nr > 0 else "")
-            )
-
-            start_time = time.time()
-
-            # Retry logic for the copy operation
-            max_retries = 3
-            for copy_attempt in range(max_retries):
-                try:
-                    await loop.run_in_executor(
-                        None,
-                        copy_with_progress,
-                        source_path,
-                        destination_path,
-                        transfer_queue,
-                        loop,
-                    )
-                    break  # Success
-                except Exception as e:
-                    if copy_attempt < max_retries - 1:
-                        wait_time = 10 * (copy_attempt + 1)
-                        logging.warning(
-                            f"Copy failed ({e}). Retrying in {wait_time}s..."
-                        )
-                        await asyncio.sleep(wait_time)
-                    else:
-                        raise e  # Re-raise after last attempt
-
-            # After copy, remove the (possibly compressed) source — unless the
-            # caller asked us to keep it (e.g. because a decoder still needs
-            # the same file locally).
-            if not keep_source:
-                os.remove(source_path)
-
-            end_time = time.time()
-            transfer_duration_seconds = end_time - start_time
-            transfer_speed_mbps = (
-                file_size_mb / transfer_duration_seconds
-                if transfer_duration_seconds > 0
-                else 0
-            )
-
-            logging.info(
-                f"Completed file transfer to NAS: {destination_path} | "
-                f"Size: {file_size_mb:.2f} MB | "
-                f"Duration: {transfer_duration_seconds:.2f} seconds | "
-                f"Speed: {transfer_speed_mbps:.2f} MB/s"
-            )
-
-            # Remove from tracking list once completed
-            transfer_queue.add_completed_transfer(os.path.basename(destination_path))
-            transfer_queue.succeeded_uploads.add(original_source_path)
-            await transfer_queue.remove_item(original_item)
-            await transfer_queue.end_transfer(source_path)
-            transfer_queue.task_done()
-
-        except Exception as e:
-            logging.error(f"Error transferring file to NAS: {str(e)}")
-            if source_path:
-                await transfer_queue.end_transfer(source_path)
-            transfer_queue.task_done()
-
-            if attempt_nr < 3 and source_path and destination_path:
-                # Re-queue for later retry (application level retry)
-                # Wait, we already did retries for the copy.
-                # If we are here, it means even the retries inside failed OR something else failed.
-                # The user asked for "retry file copies if they fail...".
-                # I implemented the inner loop.
-                # Keeping the outer loop logic (attempt_nr) as a fallback is good practice?
-                # The original code had attempt_nr.
-                # Let's keep it but maybe increase delay.
-
-                await transfer_queue.remove_item(original_item)
-                await transfer_queue.add_item(
-                    source_path,
-                    destination_path,
-                    attempt_nr + 1,
-                    keep_source=keep_source,
-                )
-
-                logging.info(
-                    f"Transfer task failed. Re-queued for retry {attempt_nr + 2}."
-                )
-                await asyncio.sleep(5)  # Small delay before next loop picks it up?
-            elif source_path:
-                logging.error(
-                    f"Failed to transfer file after multiple attempts: {os.path.basename(destination_path)}"
-                )
-                await transfer_queue.remove_item(original_item)
-
-                # Delete the file if transfer fails — but keep it when someone
-                # else (the decoder) is still depending on it. Leaving it in
-                # place also means the 24h /tmp cron will clean up eventually.
-                if not keep_source:
-                    try:
-                        os.remove(source_path)
-                        logging.info(f"Deleted file after failed transfer: {source_path}")
-                    except Exception as ex:
-                        logging.error(
-                            f"Error deleting file after failed transfer: {str(ex)}"
-                        )
-
-        # If the dir is empty, remove it
-        if source_path:
-            try:
-                source_dir = os.path.dirname(source_path)
-                # Cleaning up empty dirs is fast, do it in executor or just sync?
-                # Sync is fine for metadata ops usually, but strict async would verify.
-                # stick to sync for simplicity on cleanup
-
-                def remove_empty_dirs(directory: str) -> None:
-                    if not os.path.exists(directory):
-                        return
-                    for item in os.listdir(directory):
-                        item_path = os.path.join(directory, item)
-                        if os.path.isdir(item_path):
-                            remove_empty_dirs(item_path)
-                    if not os.listdir(directory):
-                        try:
-                            os.rmdir(directory)
-                            logging.info(f"Removed empty directory: {directory}")
-                        except OSError:
-                            pass
-
-                remove_empty_dirs(source_dir)
-            except Exception as e:
-                logging.error(f"Error removing directory: {str(e)}")
+        raise RuntimeError(
+            f"zstd failed with code {proc.returncode}: {err.decode(errors='replace')}"
+        )
+    try:
+        os.remove(source_path)
+    except OSError:
+        logger.exception("could not remove %s after compression", source_path)
+    return compressed

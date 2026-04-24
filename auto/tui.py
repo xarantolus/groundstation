@@ -1,0 +1,165 @@
+from __future__ import annotations
+
+import asyncio
+import datetime
+import logging
+import os
+from typing import Optional
+
+from rich.console import Console, ConsoleOptions, Group, RenderResult
+from rich.layout import Layout
+from rich.live import Live
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+
+from .bus import EventBus
+from .pass_predictor import azimuth_to_compass
+from .view import ViewModel
+
+logger = logging.getLogger("groundstation.tui")
+
+
+class TUIService:
+    def __init__(self, bus: EventBus, view: ViewModel, refresh_per_second: int = 4) -> None:
+        self._bus = bus
+        self._view = view
+        self._refresh = refresh_per_second
+        self._stop = asyncio.Event()
+
+    async def run(self) -> None:
+        # TUI just reads from the ViewModel — a dedicated subscriber (started
+        # in main.py) keeps it updated. Rich Live refresh handles repainting.
+        try:
+            console = Console()
+            renderable = _TUIRenderable(self._view)
+            with Live(renderable, console=console, screen=True, refresh_per_second=self._refresh):
+                try:
+                    await self._stop.wait()
+                except asyncio.CancelledError:
+                    pass
+        except Exception:
+            logger.exception("TUI loop crashed")
+
+    def stop(self) -> None:
+        self._stop.set()
+
+
+class _TUIRenderable:
+    def __init__(self, view: ViewModel) -> None:
+        self._view = view
+        self._layout = Layout()
+        self._layout.split(Layout(name="top", size=15), Layout(name="bottom"))
+        self._layout["top"].split_row(Layout(name="passes", ratio=3), Layout(name="side", ratio=1))
+        self._layout["side"].split_column(Layout(name="gate", size=3), Layout(name="transfers"))
+        self._layout["bottom"].split_row(Layout(name="main_log"), Layout(name="decoder_log"))
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        # Snapshot under the view's lock. Everything below is immutable.
+        snap = self._view.snapshot()
+        self._layout["passes"].update(self._passes_table(snap))
+        self._layout["gate"].update(self._gate_panel(snap))
+        self._layout["transfers"].update(self._transfers_panel(snap))
+        self._layout["main_log"].update(self._log_panel(snap))
+        if snap.decoding or snap.decoder_log:
+            self._layout["decoder_log"].visible = True
+            self._layout["decoder_log"].update(self._decoder_log_panel(snap))
+        else:
+            self._layout["decoder_log"].visible = False
+        yield self._layout
+
+    def _passes_table(self, snap) -> Table:
+        table = Table(title="Next Overpasses", expand=True)
+        table.add_column("Satellite")
+        table.add_column("Start")
+        table.add_column("Duration")
+        table.add_column("Max El.")
+        table.add_column("Direction")
+        table.add_column("Status")
+
+        now = datetime.datetime.now()
+        past = [p for p in snap.passes if p.pass_info.end_time <= now]
+        future = [p for p in snap.passes if p.pass_info.end_time > now]
+        display = past[-1:] + future
+
+        for p in display[:12]:
+            start = p.pass_info.start_time.strftime("%H:%M:%S")
+            if p.pass_info.start_time < now < p.pass_info.end_time:
+                start = f"[bold green]{start} (LIVE)[/bold green]"
+            elif p.pass_info.end_time <= now:
+                start = f"[dim]{start}[/dim]"
+            dirs = "→".join(
+                [
+                    azimuth_to_compass(p.pass_info.start_azimuth),
+                    azimuth_to_compass(p.pass_info.max_azimuth),
+                    azimuth_to_compass(p.pass_info.end_azimuth),
+                ]
+            )
+            table.add_row(
+                p.satellite.name,
+                start,
+                f"{p.pass_info.duration_minutes:.1f}m",
+                f"{p.pass_info.max_elevation:.1f}°",
+                dirs,
+                p.status.value,
+            )
+        return table
+
+    def _gate_panel(self, snap) -> Panel:
+        gate = snap.gate
+        if gate.open:
+            text = Text(f"open — {gate.reason}", style="green")
+        else:
+            text = Text(f"closed — {gate.reason}", style="yellow")
+        return Panel(text, title="Decode gate", border_style="cyan" if gate.open else "yellow")
+
+    def _transfers_panel(self, snap) -> Panel:
+        lines = []
+        if snap.active_transfers:
+            for t in snap.active_transfers:
+                label = t.label or os.path.basename(t.source_path)
+                bar_len = 16
+                filled = int(t.progress / 100 * bar_len)
+                bar = "█" * filled + "░" * (bar_len - filled)
+                lines.append(f"{label}")
+                lines.append(f"[{bar}] {t.progress:>3.0f}%")
+        else:
+            lines.append("[dim]no active transfers[/dim]")
+
+        if snap.completed_transfers:
+            lines.append("")
+            lines.append("[bold]recent:[/bold]")
+            for c in snap.completed_transfers[-5:][::-1]:
+                color = "green" if c.status == "ok" else "red"
+                label = c.label or os.path.basename(c.source_path)
+                ts = c.ts.strftime("%H:%M:%S")
+                mark = "✓" if c.status == "ok" else "✗"
+                lines.append(f"[{color}]{mark} {label}[/{color}] [dim]({ts})[/dim]")
+
+        return Panel(Group(*[Text.from_markup(l) for l in lines]), title="Transfers")
+
+    def _log_panel(self, snap) -> Panel:
+        lines = [
+            Text(f"{l.ts.strftime('%H:%M:%S')} {l.message}", style=_level_style(l.level))
+            for l in snap.main_log[-200:]
+        ]
+        return Panel(Group(*lines), title="Log")
+
+    def _decoder_log_panel(self, snap) -> Panel:
+        lines = [
+            Text(l.line, style="dim")
+            for l in snap.decoder_log[-60:]
+        ]
+        title = "Decoder log"
+        if snap.decoding:
+            title = f"Decoder log — {snap.decoding.decoder_name or 'decoder'} ({snap.decoding.pass_id})"
+        return Panel(Group(*lines), title=title, border_style="cyan")
+
+
+def _level_style(level: str) -> str:
+    return {
+        "ERROR": "red",
+        "WARNING": "yellow",
+        "INFO": "",
+        "DEBUG": "dim",
+    }.get(level.upper(), "")

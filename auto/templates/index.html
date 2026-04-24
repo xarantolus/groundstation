@@ -1,316 +1,319 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Groundstation Status</title>
-    <style>
-        :root {
-            --bg-color: #121212;
-            --surface-color: #1e1e1e;
-            --surface-highlight: #2c2c2c;
-            --text-primary: #e0e0e0;
-            --text-secondary: #a0a0a0;
-            --accent-color: #00bcd4;
-            --accent-live: #00e676;
-            --border-color: #333;
-            --font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-        }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Groundstation</title>
+<style>
+  :root{
+    --bg:#121212;--surface:#1e1e1e;--surface2:#2c2c2c;
+    --text:#e0e0e0;--text2:#a0a0a0;
+    --accent:#00bcd4;--live:#00e676;--warn:#ff9800;--err:#f44336;
+    --border:#333;
+    --font:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    --mono:'Consolas','Monaco',monospace;
+  }
+  body{background:var(--bg);color:var(--text);font-family:var(--font);margin:0;padding:16px;font-size:14px}
+  .grid{max-width:1400px;margin:0 auto;display:grid;grid-gap:16px;grid-template-columns:3fr 1fr;grid-template-rows:auto auto 1fr;height:calc(100vh - 32px)}
+  @media (max-width:1024px){.grid{grid-template-columns:1fr;height:auto}.card{margin-bottom:12px}}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;display:flex;flex-direction:column;overflow:hidden}
+  .card h2{font-size:.95em;letter-spacing:.04em;text-transform:uppercase;color:var(--accent);margin:0 0 10px 0;border-bottom:1px solid var(--border);padding-bottom:8px;font-weight:600}
+  .card-body{flex:1;overflow-y:auto}
+  #passes{grid-column:1/2;grid-row:1/2;min-height:240px}
+  #gate{grid-column:2/3;grid-row:1/2}
+  #transfers{grid-column:2/3;grid-row:2/3}
+  #decoder{grid-column:1/2;grid-row:2/3;min-height:140px}
+  #logs{grid-column:1/-1;grid-row:3/4;min-height:240px}
 
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-primary);
-            font-family: var(--font-family);
-            margin: 0;
-            padding: 20px;
-            font-size: 14px;
-        }
+  table{width:100%;border-collapse:collapse;font-size:1em}
+  th{text-align:left;border-bottom:1px solid var(--border);padding:6px 8px;color:var(--text2);font-weight:normal}
+  td{padding:8px;border-bottom:1px solid var(--surface2)}
+  tr:last-child td{border-bottom:none}
+  tr.past{opacity:.55}
+  tr.live{color:var(--live);font-weight:bold;animation:pulse 2s infinite}
+  @keyframes pulse{50%{opacity:.7}}
+  td a{color:inherit;text-decoration:none;border-bottom:1px dotted #777}
 
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            grid-template-rows: auto 1fr;
-            grid-gap: 20px;
-            height: calc(100vh - 40px);
-        }
+  .status-pill{display:inline-block;padding:2px 6px;border-radius:8px;font-size:.8em;background:var(--surface2);color:var(--text2)}
+  .status-recording,.status-decoding{background:var(--accent);color:#000}
+  .status-done{background:var(--live);color:#000}
+  .status-failed{background:var(--err);color:#fff}
+  .status-recorded_partial{background:var(--warn);color:#000}
 
-        @media (max-width: 1024px) {
-            .container {
-                grid-template-columns: 1fr;
-                grid-template-rows: auto;
-                height: auto;
-            }
+  .gate-box{padding:8px;border-radius:6px;font-family:var(--mono);font-size:.95em;line-height:1.4}
+  .gate-open{background:rgba(0,230,118,.1);border:1px solid var(--live);color:var(--live)}
+  .gate-closed{background:rgba(255,152,0,.08);border:1px solid var(--warn);color:var(--warn)}
 
-            #passes-card,
-            #transfers-card,
-            #logs-card {
-                grid-column: 1 / -1 !important;
-                grid-row: auto !important;
-                margin-bottom: 20px;
-            }
-        }
+  .xfer{padding:8px;background:var(--surface2);border-radius:4px;margin-bottom:6px;font-family:var(--mono);font-size:.9em}
+  .xfer-label{display:block;margin-bottom:4px;font-weight:bold;word-break:break-all}
+  .xfer-bar{height:5px;background:#444;border-radius:3px;overflow:hidden}
+  .xfer-fill{height:100%;background:var(--accent);transition:width .25s}
+  .xfer-pct{font-size:.75em;color:var(--text2);text-align:right;margin-top:2px}
+  .xfer-done{font-size:.85em;color:var(--text2);padding:3px 0;border-bottom:1px solid var(--surface2)}
+  .xfer-ok{color:var(--live)}.xfer-fail{color:var(--err)}
 
-        .card {
-            background-color: var(--surface-color);
-            border-radius: 8px;
-            border: 1px solid var(--border-color);
-            padding: 15px;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
+  .log-line{font-family:var(--mono);line-height:1.35;padding:1px 0;white-space:pre-wrap;word-break:break-all}
+  .log-time{color:#666;margin-right:6px;user-select:none}
+  .log-INFO{color:#d0d0d0}.log-WARNING{color:var(--warn)}.log-ERROR{color:var(--err)}.log-DEBUG{color:#777}
 
-        .card-header {
-            font-size: 1.1em;
-            font-weight: 600;
-            margin-bottom: 15px;
-            color: var(--accent-color);
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 10px;
-        }
-
-        .card-content {
-            flex: 1;
-            overflow-y: auto;
-        }
-
-        /* Passes Table */
-        #passes-card {
-            grid-column: 1 / 2;
-            grid-row: 1 / 2;
-            min-height: 250px;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 1.1em;
-        }
-
-        th {
-            text-align: left;
-            border-bottom: 1px solid var(--border-color);
-            padding: 8px;
-            color: var(--text-secondary);
-            font-weight: normal;
-        }
-
-        td {
-            padding: 12px 8px;
-            border-bottom: 1px solid var(--surface-highlight);
-        }
-
-        tr:last-child td {
-            border-bottom: none;
-        }
-
-        .live-pass {
-            color: var(--accent-live);
-            font-weight: bold;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0% {
-                opacity: 1;
-            }
-
-            50% {
-                opacity: 0.7;
-            }
-
-            100% {
-                opacity: 1;
-            }
-        }
-
-        /* Transfers */
-        #transfers-card {
-            grid-column: 2 / 3;
-            grid-row: 1 / 2;
-            min-height: 250px;
-        }
-
-        .transfer-item {
-            padding: 10px;
-            background-color: var(--surface-highlight);
-            margin-bottom: 8px;
-            border-radius: 4px;
-            font-family: monospace;
-        }
-
-        .transfer-name {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-
-        .progress-bar {
-            height: 6px;
-            background-color: #444;
-            border-radius: 3px;
-            overflow: hidden;
-            margin-top: 5px;
-        }
-
-        .progress-fill {
-            height: 100%;
-            background-color: var(--accent-color);
-            width: 0%;
-            transition: width 0.3s ease;
-        }
-
-        .completed-transfer {
-            font-size: 0.9em;
-            color: var(--text-secondary);
-            padding: 4px 0;
-            border-bottom: 1px solid var(--surface-highlight);
-        }
-
-        .status-ok {
-            color: var(--accent-live);
-        }
-
-        .status-err {
-            color: #f44336;
-        }
-
-        /* Logs */
-        #logs-card {
-            grid-column: 1 / -1;
-            grid-row: 2 / 3;
-            min-height: 300px;
-        }
-
-        .log-entry {
-            font-family: 'Consolas', 'Monaco', monospace;
-            padding: 2px 0;
-            white-space: pre-wrap;
-            word-break: break-all;
-            line-height: 1.4;
-            color: #ccc;
-        }
-
-        .log-time {
-            color: #666;
-            margin-right: 8px;
-            user-select: none;
-        }
-
-        .log-INFO {
-            color: #bdbdbd;
-        }
-
-        .log-WARNING {
-            color: #ff9800;
-        }
-
-        .log-ERROR {
-            color: #f44336;
-        }
-
-        .log-DEBUG {
-            color: #616161;
-        }
-    </style>
+  .decoder-log{font-family:var(--mono);font-size:.88em;color:#aaa;line-height:1.3;white-space:pre-wrap;word-break:break-all}
+  .dim{color:var(--text2)}
+</style>
 </head>
-
 <body>
-    <div class="container">
-        <div id="passes-card" class="card">
-            <div class="card-header">Next Overpasses</div>
-            <div class="card-content" id="passes-content">
-                {{ passes_html | safe }}
-            </div>
-        </div>
-
-        <div id="transfers-card" class="card">
-            <div class="card-header">Transfers</div>
-            <div class="card-content" id="transfers-content">
-                {{ transfers_html | safe }}
-            </div>
-        </div>
-
-        <div id="logs-card" class="card">
-            <div class="card-header">System Log</div>
-            <div class="card-content" id="logs-content">
-                {{ logs_html | safe }}
-            </div>
-        </div>
+<div class="grid">
+  <section id="passes" class="card">
+    <h2>Next overpasses</h2>
+    <div class="card-body">
+      <table id="passes-table">
+        <thead><tr><th>Satellite</th><th>Start</th><th>Duration</th><th>Max El.</th><th>Direction</th><th>Status</th></tr></thead>
+        <tbody id="passes-body"><tr><td colspan="6" class="dim">Connecting…</td></tr></tbody>
+      </table>
     </div>
+  </section>
 
-    <script>
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
-        let socket;
-        let retryInterval = 1000;
+  <section id="gate" class="card">
+    <h2>Decode gate</h2>
+    <div class="card-body"><div id="gate-body" class="gate-box dim">unknown</div></div>
+  </section>
 
-        function connect() {
-            socket = new WebSocket(wsUrl);
+  <section id="transfers" class="card">
+    <h2>Transfers</h2>
+    <div class="card-body" id="transfers-body"><div class="dim">Connecting…</div></div>
+  </section>
 
-            socket.onopen = function () {
-                console.log("WebSocket Connected");
-                retryInterval = 1000; // Reset retry interval
-            };
+  <section id="decoder" class="card">
+    <h2 id="decoder-title">Decoder log</h2>
+    <div class="card-body decoder-log" id="decoder-body"><span class="dim">idle</span></div>
+  </section>
 
-            socket.onmessage = function (event) {
-                const msg = JSON.parse(event.data);
-                if (msg.target === 'passes-content') {
-                    document.getElementById('passes-content').innerHTML = msg.html;
-                } else if (msg.target === 'transfers-content') {
-                    document.getElementById('transfers-content').innerHTML = msg.html;
-                } else if (msg.target === 'logs-content') {
-                    const logsDiv = document.getElementById('logs-content');
-                    // Check if scrolled to bottom
-                    const isAtBottom = logsDiv.scrollHeight - logsDiv.scrollTop <= logsDiv.clientHeight + 50;
+  <section id="logs" class="card">
+    <h2>System log</h2>
+    <div class="card-body" id="logs-body"></div>
+  </section>
+</div>
 
-                    if (msg.method === 'append') {
-                        // Create a temporary container to parse HTML string into nodes
-                        const temp = document.createElement('div');
-                        temp.innerHTML = msg.html;
-                        while (temp.firstChild) {
-                            logsDiv.appendChild(temp.firstChild);
-                        }
-                    } else {
-                        logsDiv.innerHTML = msg.html;
-                    }
+<script>
+const COMPASS = ["N","NE","E","SE","S","SW","W","NW"];
+const compass = az => COMPASS[Math.floor((((az+22.5)%360)+360)%360/45)];
+const DECODER_LOG_CAP = 300;
+const MAIN_LOG_CAP = 500;
 
-                    // Limit log entries to prevent browser lag (keep last 500)
-                    while (logsDiv.children.length > 500) {
-                        logsDiv.removeChild(logsDiv.firstChild);
-                    }
+const state = {
+  passes: [],
+  recording: null,
+  decoding: null,
+  active_transfers: [],
+  completed_transfers: [],
+  main_log: [],
+  decoder_log: [],
+  gate: {open:true, reason:""},
+};
 
-                    if (isAtBottom) {
-                        logsDiv.scrollTop = logsDiv.scrollHeight;
-                    }
-                }
-            };
+function fmtTime(iso){
+  const d = new Date(iso);
+  return d.toLocaleTimeString(undefined,{hour12:false});
+}
+function fmtStartDisplay(pass, now){
+  const start = new Date(pass.pass_info.start_time);
+  const end = new Date(pass.pass_info.end_time);
+  const sameDay = start.toDateString() === now.toDateString();
+  const base = sameDay ? start.toLocaleTimeString(undefined,{hour12:false}) : start.toLocaleString(undefined,{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});
+  if (start < now && end > now) return base + " (LIVE)";
+  if (end <= now) return base + " (ended)";
+  return base;
+}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 
-            socket.onclose = function (e) {
-                console.log('Socket is closed. Reconnect will be attempted in ' + retryInterval / 1000 + ' second.', e.reason);
-                setTimeout(function () {
-                    retryInterval = Math.min(retryInterval * 2, 30000); // Backoff up to 30s
-                    connect();
-                }, retryInterval);
-            };
+function renderPasses(){
+  const body = document.getElementById('passes-body');
+  const now = new Date();
+  if (!state.passes.length){ body.innerHTML = '<tr><td colspan="6" class="dim">No upcoming overpasses.</td></tr>'; return; }
+  const past = state.passes.filter(p => new Date(p.pass_info.end_time) <= now);
+  const future = state.passes.filter(p => new Date(p.pass_info.end_time) > now);
+  const display = past.slice(-1).concat(future).slice(0, 15);
+  const rows = display.map(p => {
+    const start = new Date(p.pass_info.start_time);
+    const end = new Date(p.pass_info.end_time);
+    const isLive = start < now && end > now;
+    const isPast = end <= now;
+    const cls = isLive ? "live" : (isPast ? "past" : "");
+    const startStr = fmtStartDisplay(p, now);
+    const dir = [compass(p.pass_info.start_azimuth), compass(p.pass_info.max_azimuth), compass(p.pass_info.end_azimuth)].join("→");
+    const norad = p.satellite.norad;
+    const name = escapeHtml(p.satellite.name);
+    const nameHtml = norad ? `<a href="https://www.n2yo.com/satellite/?s=${encodeURIComponent(norad)}" target="_blank" rel="noreferrer">${name}</a>` : name;
+    const status = escapeHtml(p.status);
+    return `<tr class="${cls}"><td>${nameHtml}</td><td>${escapeHtml(startStr)}</td><td>${p.pass_info.duration_minutes.toFixed(1)}m</td><td>${p.pass_info.max_elevation.toFixed(1)}°</td><td>${dir}</td><td><span class="status-pill status-${status}">${status}</span></td></tr>`;
+  });
+  body.innerHTML = rows.join("");
+}
 
-            socket.onerror = function (err) {
-                console.error('Socket encountered error: ', err.message, 'Closing socket');
-                socket.close();
-            };
-        }
+function renderGate(){
+  const el = document.getElementById('gate-body');
+  el.className = 'gate-box ' + (state.gate.open ? 'gate-open' : 'gate-closed');
+  el.textContent = (state.gate.open ? 'OPEN — ' : 'CLOSED — ') + (state.gate.reason || '(unknown)');
+}
 
-        // Initial scroll to bottom for logs
-        const logsDiv = document.getElementById('logs-content');
-        logsDiv.scrollTop = logsDiv.scrollHeight;
+function renderTransfers(){
+  const body = document.getElementById('transfers-body');
+  const parts = [];
+  if (state.active_transfers.length){
+    for (const t of state.active_transfers){
+      const pct = Math.max(0, Math.min(100, t.progress||0));
+      const label = escapeHtml(t.label || t.source_path.split(/[\\/]/).pop());
+      parts.push(`<div class="xfer"><span class="xfer-label">${label}</span><div class="xfer-bar"><div class="xfer-fill" style="width:${pct}%"></div></div><div class="xfer-pct">${pct.toFixed(0)}%</div></div>`);
+    }
+  } else {
+    parts.push('<div class="dim">No active transfers.</div>');
+  }
+  if (state.completed_transfers.length){
+    parts.push('<div style="margin-top:10px;font-weight:bold">Recent:</div>');
+    for (const c of state.completed_transfers.slice(-8).reverse()){
+      const cls = c.status === 'ok' ? 'xfer-ok' : 'xfer-fail';
+      const mark = c.status === 'ok' ? '✓' : '✗';
+      const label = escapeHtml(c.label || c.source_path.split(/[\\/]/).pop());
+      parts.push(`<div class="xfer-done"><span class="${cls}">${mark}</span> ${label} <span style="float:right;color:#888">${fmtTime(c.ts)}</span></div>`);
+    }
+  }
+  body.innerHTML = parts.join("");
+}
 
-        connect();
-    </script>
+function renderDecoder(){
+  const title = document.getElementById('decoder-title');
+  const body = document.getElementById('decoder-body');
+  if (state.decoding){
+    const d = state.decoding;
+    title.textContent = `Decoder log — ${d.decoder_name || 'decoder'} (${d.pass_id})`;
+  } else {
+    title.textContent = 'Decoder log';
+  }
+  if (!state.decoder_log.length){
+    body.innerHTML = '<span class="dim">idle</span>';
+    return;
+  }
+  const lines = state.decoder_log.slice(-120).map(l => escapeHtml(l.line));
+  body.textContent = lines.join('\n');
+  body.scrollTop = body.scrollHeight;
+}
+
+function renderLogs(){
+  const body = document.getElementById('logs-body');
+  const atBottom = body.scrollHeight - body.scrollTop <= body.clientHeight + 40;
+  const lines = state.main_log.slice(-MAIN_LOG_CAP).map(l => {
+    const t = escapeHtml(fmtTime(l.ts));
+    const m = escapeHtml(l.message);
+    return `<div class="log-line log-${escapeHtml(l.level)}"><span class="log-time">${t}</span>${m}</div>`;
+  });
+  body.innerHTML = lines.join('');
+  if (atBottom) body.scrollTop = body.scrollHeight;
+}
+
+function applySnapshot(snap){
+  state.passes = snap.passes || [];
+  state.recording = snap.recording || null;
+  state.decoding = snap.decoding || null;
+  state.active_transfers = snap.active_transfers || [];
+  state.completed_transfers = snap.completed_transfers || [];
+  state.main_log = snap.main_log || [];
+  state.decoder_log = snap.decoder_log || [];
+  state.gate = snap.gate || {open:true, reason:""};
+  renderAll();
+}
+
+function applyEvent(ev){
+  const t = ev.type;
+  if (t === 'passes_table_changed'){
+    state.passes = ev.passes || [];
+    renderPasses();
+  } else if (t === 'pass_predicted' || t === 'pass_upcoming' || t === 'pass_started' || t === 'pass_ended'){
+    const p = ev.pass;
+    const i = state.passes.findIndex(x => x.id === p.id);
+    if (i >= 0) state.passes[i] = p; else state.passes.push(p);
+    state.passes.sort((a,b) => new Date(a.pass_info.start_time) - new Date(b.pass_info.start_time));
+    renderPasses();
+  } else if (t === 'recording_started'){
+    state.recording = ev.pass_id; setPassStatus(ev.pass_id, 'recording'); renderPasses();
+  } else if (t === 'recording_completed'){
+    if (state.recording === ev.pass_id) state.recording = null;
+    setPassStatus(ev.pass_id, 'recorded'); renderPasses();
+  } else if (t === 'recording_failed'){
+    if (state.recording === ev.pass_id) state.recording = null;
+    setPassStatus(ev.pass_id, 'failed'); renderPasses();
+  } else if (t === 'decode_started'){
+    state.decoding = {pass_id: ev.pass_id, decoder_index: ev.decoder_index, decoder_name: ev.decoder_name};
+    setPassStatus(ev.pass_id, 'decoding');
+    renderDecoder(); renderPasses();
+  } else if (t === 'decode_completed' || t === 'decode_failed'){
+    if (state.decoding && state.decoding.pass_id === ev.pass_id && state.decoding.decoder_index === ev.decoder_index){
+      state.decoding = null;
+    }
+    renderDecoder();
+  } else if (t === 'decode_log'){
+    state.decoder_log.push(ev);
+    if (state.decoder_log.length > DECODER_LOG_CAP) state.decoder_log.splice(0, state.decoder_log.length - DECODER_LOG_CAP);
+    renderDecoder();
+  } else if (t === 'decode_gate_state_changed'){
+    state.gate = {open: ev.open, reason: ev.reason};
+    renderGate();
+  } else if (t === 'transfer_started'){
+    const existing = state.active_transfers.find(x => x.request_id === ev.request_id);
+    if (!existing){
+      state.active_transfers.push({request_id: ev.request_id, source_path: ev.source_path, destination_path: ev.destination_path, label: ev.label, copied: 0, total: 0, progress: 0});
+    }
+    renderTransfers();
+  } else if (t === 'transfer_progress'){
+    let x = state.active_transfers.find(x => x.request_id === ev.request_id);
+    if (!x){
+      x = {request_id: ev.request_id, source_path: ev.source_path, destination_path: '', label: null, copied: 0, total: 0, progress: 0};
+      state.active_transfers.push(x);
+    }
+    x.copied = ev.copied; x.total = ev.total;
+    x.progress = ev.total > 0 ? (ev.copied / ev.total * 100) : 0;
+    renderTransfers();
+  } else if (t === 'transfer_completed'){
+    state.active_transfers = state.active_transfers.filter(x => x.request_id !== ev.request_id);
+    state.completed_transfers.push({request_id: ev.request_id, source_path: ev.source_path, label: ev.label, status: 'ok', ts: ev.ts});
+    if (state.completed_transfers.length > 100) state.completed_transfers.splice(0, state.completed_transfers.length - 100);
+    renderTransfers();
+  } else if (t === 'transfer_failed'){
+    if (!ev.will_retry){
+      state.active_transfers = state.active_transfers.filter(x => x.request_id !== ev.request_id);
+      state.completed_transfers.push({request_id: ev.request_id, source_path: ev.source_path, label: null, status: 'fail', ts: ev.ts});
+      renderTransfers();
+    }
+  } else if (t === 'log_message'){
+    state.main_log.push(ev);
+    if (state.main_log.length > MAIN_LOG_CAP) state.main_log.splice(0, state.main_log.length - MAIN_LOG_CAP);
+    renderLogs();
+  }
+}
+
+function setPassStatus(pass_id, status){
+  const p = state.passes.find(x => x.id === pass_id);
+  if (p) p.status = status;
+}
+
+function renderAll(){ renderPasses(); renderGate(); renderTransfers(); renderDecoder(); renderLogs(); }
+
+let ws;
+let retry = 500;
+function connect(){
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/ws`);
+  ws.onopen = () => { console.log('ws open'); retry = 500; };
+  ws.onmessage = e => {
+    let msg;
+    try { msg = JSON.parse(e.data); } catch { return; }
+    if (msg.kind === 'snapshot') applySnapshot(msg.snapshot);
+    else if (msg.kind === 'event') applyEvent(msg.event);
+  };
+  ws.onclose = () => { setTimeout(() => { retry = Math.min(retry * 2, 30000); connect(); }, retry); };
+  ws.onerror = () => { try { ws.close(); } catch {} };
+}
+connect();
+// Repaint passes every 5s so "LIVE"/"ended" transitions advance with wall-clock time.
+setInterval(renderPasses, 5000);
+</script>
 </body>
-
 </html>

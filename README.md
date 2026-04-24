@@ -86,6 +86,6 @@ LOCATION_ALT=<altitude of antenna at coordinates in meters over sea level>
 In the main repo directory, run this to actually run the groundstation:
 
 ```
-sudo python auto/tracker.py
+sudo python -m auto.main
 ```
 

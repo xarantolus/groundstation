@@ -1,0 +1,322 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import uuid
+from typing import Dict, List, Set, Tuple
+
+from . import events as E
+from .bus import EventBus, run_subscriber
+from .decode_gate import DecodeGate
+from .models import GroundstationConfig, IQ_DATA_FILE_EXTENSION, Pass, PassStatus, TransferRequest
+from .podman import filter_decoder_outputs, run_decoder
+from .state import StateStore
+
+logger = logging.getLogger("groundstation.decoder")
+
+
+class DecoderService:
+    """One decoder at a time, gated by :class:`DecodeGate`. Maintains a
+    persistent queue of (pass_id, decoder_index) work items.
+
+    Between runs (including between decoders of the same pass) the gate is
+    re-checked — so a closer pass emerging partway through a decoder chain
+    cleanly defers the remaining runs without interrupting the active one.
+    """
+
+    def __init__(
+        self,
+        cfg: GroundstationConfig,
+        bus: EventBus,
+        state: StateStore,
+        gate: DecodeGate,
+        passes: Dict[str, Pass],
+    ) -> None:
+        self._cfg = cfg
+        self._bus = bus
+        self._state = state
+        self._gate = gate
+        self._passes = passes
+        self._queue: asyncio.Queue[Tuple[str, int]] = asyncio.Queue()
+        self._in_queue: Set[Tuple[str, int]] = set()
+        self._stop = asyncio.Event()
+        self._iq_upload_done: Dict[str, asyncio.Event] = {}
+        self._iq_upload_ok: Dict[str, bool] = {}
+        self._cleanup_tasks: Set[asyncio.Task] = set()
+        self._cleanup_launched: Set[str] = set()
+
+        for key in state.load_decode_queue():
+            self._enqueue_persisted(key)
+
+    def _enqueue_persisted(self, key: Tuple[str, int]) -> None:
+        if key in self._in_queue:
+            return
+        self._in_queue.add(key)
+        self._queue.put_nowait(key)
+
+    async def run(self) -> None:
+        sub = self._bus.subscribe(
+            E.RecordingCompleted,
+            E.TransferCompleted,
+            E.TransferFailed,
+            name="decoder.events",
+            queue_size=128,
+        )
+        sub_task = asyncio.create_task(
+            run_subscriber(sub, self._on_event, "decoder.events")
+        )
+        try:
+            while not self._stop.is_set():
+                try:
+                    key = await self._queue.get()
+                except asyncio.CancelledError:
+                    raise
+                self._in_queue.discard(key)
+                await self._gate.wait_open()
+                if self._stop.is_set():
+                    break
+                try:
+                    await self._run_one(*key)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("decoder run failed: %s", key)
+        finally:
+            sub.close()
+            sub_task.cancel()
+            try:
+                await sub_task
+            except asyncio.CancelledError:
+                pass
+            for t in list(self._cleanup_tasks):
+                t.cancel()
+            for t in list(self._cleanup_tasks):
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+    def stop(self) -> None:
+        self._stop.set()
+        # Push a sentinel so the queue wait unblocks. We don't actually use
+        # the value — the stop check above handles it.
+        try:
+            self._queue.put_nowait(("__stop__", -1))
+        except asyncio.QueueFull:
+            pass
+
+    async def _on_event(self, event: E.Event) -> None:
+        if isinstance(event, E.RecordingCompleted):
+            p = self._passes.get(event.pass_id)
+            if not p:
+                logger.warning("decoder got RecordingCompleted for unknown pass %s", event.pass_id)
+                return
+            pending = list(range(len(p.satellite.decoder)))
+            p.decoders_pending = pending
+            p.status = PassStatus.RECORDED
+            self._state.save_pass(p)
+            for idx in pending:
+                key = (p.id, idx)
+                self._state.decode_put(p.id, idx)
+                if key not in self._in_queue:
+                    self._in_queue.add(key)
+                    await self._queue.put(key)
+                await self._bus.publish(E.DecodeQueued(pass_id=p.id, decoder_index=idx))
+        elif isinstance(event, E.TransferCompleted):
+            pid = self._pass_id_for_iq_path(event.source_path)
+            if pid:
+                self._iq_upload_ok[pid] = True
+                ev = self._iq_upload_done.get(pid)
+                if ev:
+                    ev.set()
+        elif isinstance(event, E.TransferFailed):
+            if event.will_retry:
+                return
+            pid = self._pass_id_for_iq_path(event.source_path)
+            if pid:
+                self._iq_upload_ok[pid] = False
+                ev = self._iq_upload_done.get(pid)
+                if ev:
+                    ev.set()
+
+    def _pass_id_for_iq_path(self, source_path: str) -> str | None:
+        src = os.path.abspath(source_path)
+        for pid, p in self._passes.items():
+            if p.recording_path and os.path.abspath(p.recording_path) == src:
+                return pid
+        return None
+
+    async def _run_one(self, pass_id: str, decoder_index: int) -> None:
+        if pass_id == "__stop__":
+            return
+        p = self._passes.get(pass_id)
+        if not p:
+            logger.warning("decoder: pass %s unknown — dropping index %d", pass_id, decoder_index)
+            self._state.decode_tombstone(pass_id, decoder_index)
+            return
+        if decoder_index >= len(p.satellite.decoder):
+            logger.warning("decoder: index %d out of range for %s", decoder_index, pass_id)
+            self._state.decode_tombstone(pass_id, decoder_index)
+            return
+
+        decoder = p.satellite.decoder[decoder_index]
+        decoder_name = decoder.name or f"decoder_{decoder_index}"
+        # Always write to a per-decoder subdirectory. If we let unnamed
+        # decoders dump into pass_dir we'd pick up recording.bin and info.json
+        # as "decoder outputs" and upload them a second time.
+        output_dir = os.path.join(p.pass_dir, decoder_name)
+
+        if not p.recording_path or not os.path.isfile(p.recording_path):
+            error = f"recording file missing at {p.recording_path}"
+            logger.error("%s: %s", pass_id, error)
+            p.decoders_failed.append(decoder_index)
+            self._state.save_pass(p)
+            self._state.decode_tombstone(pass_id, decoder_index)
+            await self._bus.publish(
+                E.DecodeFailed(pass_id=pass_id, decoder_index=decoder_index, error=error)
+            )
+            return
+
+        p.status = PassStatus.DECODING
+        self._state.save_pass(p)
+
+        loop = asyncio.get_running_loop()
+
+        def on_log(line: str) -> None:
+            loop.create_task(
+                self._bus.publish(
+                    E.DecodeLog(pass_id=pass_id, decoder_index=decoder_index, line=line)
+                )
+            )
+
+        await self._bus.publish(
+            E.DecodeStarted(
+                pass_id=pass_id, decoder_index=decoder_index, decoder_name=decoder_name
+            )
+        )
+
+        try:
+            rc = await run_decoder(
+                p.satellite,
+                decoder,
+                p.pass_dir,
+                output_dir,
+                log_callback=on_log,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            p.decoders_failed.append(decoder_index)
+            self._state.save_pass(p)
+            self._state.decode_tombstone(pass_id, decoder_index)
+            await self._bus.publish(
+                E.DecodeFailed(pass_id=pass_id, decoder_index=decoder_index, error=str(e))
+            )
+            return
+
+        surviving = filter_decoder_outputs(output_dir, decoder)
+        if not surviving:
+            p.decoders_failed.append(decoder_index)
+            self._state.save_pass(p)
+            self._state.decode_tombstone(pass_id, decoder_index)
+            await self._bus.publish(
+                E.DecodeFailed(
+                    pass_id=pass_id,
+                    decoder_index=decoder_index,
+                    error=(
+                        f"decoder exited {rc} and produced no usable output"
+                        if rc != 0
+                        else "decoder output below min_files/min_size_bytes"
+                    ),
+                )
+            )
+        else:
+            p.decoders_done.append(decoder_index)
+            self._state.save_pass(p)
+            self._state.decode_tombstone(pass_id, decoder_index)
+            for path in surviving:
+                rel = os.path.relpath(path, p.pass_dir)
+                req = TransferRequest(
+                    id=str(uuid.uuid4()),
+                    source_path=path,
+                    destination_path=self._nas_path(p, rel),
+                    keep_source=False,
+                    compress=path.endswith(IQ_DATA_FILE_EXTENSION),
+                    pass_id=pass_id,
+                    label=f"{p.satellite.name} {decoder_name}/{os.path.basename(path)}",
+                )
+                self._state.transfer_put(req)
+                await self._bus.publish(E.TransferQueued(request=req))
+            rels = [os.path.relpath(out, p.pass_dir) for out in surviving]
+            await self._bus.publish(
+                E.DecodeCompleted(
+                    pass_id=pass_id,
+                    decoder_index=decoder_index,
+                    outputs=rels,
+                )
+            )
+
+        if self._all_decoders_settled(p) and p.id not in self._cleanup_launched:
+            # Cleanup (incl. waiting up to 30 minutes for the IQ upload) must
+            # not block the decoder main loop — otherwise a slow NAS stalls
+            # every subsequent pass. Spawn it as a background task.
+            self._cleanup_launched.add(p.id)
+            task = asyncio.create_task(self._after_all_decoders(p))
+            self._cleanup_tasks.add(task)
+            task.add_done_callback(self._cleanup_tasks.discard)
+
+    def _all_decoders_settled(self, p: Pass) -> bool:
+        total = len(p.satellite.decoder)
+        done = len(set(p.decoders_done) | set(p.decoders_failed))
+        return done >= total
+
+    async def _after_all_decoders(self, p: Pass) -> None:
+        if p.decoders_done:
+            p.status = PassStatus.DECODED
+        else:
+            p.status = PassStatus.FAILED
+        self._state.save_pass(p)
+
+        iq = p.recording_path
+        if iq and os.path.isfile(iq):
+            if p.satellite.skip_iq_upload:
+                try:
+                    os.remove(iq)
+                except OSError:
+                    logger.exception("could not remove skip_iq_upload IQ %s", iq)
+            elif p.satellite.decoder:
+                ok = await self._await_iq_upload(p, timeout=1800)
+                if ok:
+                    try:
+                        os.remove(iq)
+                    except OSError:
+                        logger.exception("could not remove uploaded IQ %s", iq)
+                else:
+                    logger.warning(
+                        "IQ upload for %s not confirmed; leaving %s in place", p.id, iq
+                    )
+
+        p.status = PassStatus.DONE if p.decoders_done else PassStatus.FAILED
+        self._state.save_pass(p)
+        # Passes in terminal state can be dropped from the live cache but we
+        # keep the state file so the UI can show history from it.
+
+    async def _await_iq_upload(self, p: Pass, timeout: float) -> bool:
+        if p.id in self._iq_upload_ok:
+            return self._iq_upload_ok[p.id]
+        ev = self._iq_upload_done.setdefault(p.id, asyncio.Event())
+        try:
+            await asyncio.wait_for(ev.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            return False
+        return self._iq_upload_ok.get(p.id, False)
+
+    def _nas_path(self, p: Pass, *parts: str) -> str:
+        prefix = os.path.join(
+            self._cfg.nas_directory,
+            p.pass_info.start_time.strftime("%Y"),
+            p.pass_info.start_time.strftime("%Y-%m-%d"),
+            f"{p.satellite.name}_{p.pass_info.start_time.strftime('%Y-%m-%d_%H-%M-%S')}",
+        )
+        return os.path.join(prefix, *parts)
