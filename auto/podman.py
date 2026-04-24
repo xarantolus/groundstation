@@ -15,7 +15,29 @@ RECORDER_IMAGE = "ghcr.io/xarantolus/groundstation/satellite-recorder:latest"
 DEFAULT_DECODER_TIMEOUT_MINUTES: float | None = 30.0
 
 
+def _cgroup_memory_available() -> bool:
+    """True when the kernel/cgroup hierarchy exposes the memory controller.
+    Without this, podman's ``--memory`` flag fails at container start with
+    ``memory.max: No such file or directory``. On Raspberry Pi OS the memory
+    controller needs ``cgroup_memory=1 cgroup_enable=memory`` in cmdline.txt."""
+    try:
+        with open("/sys/fs/cgroup/cgroup.controllers") as f:
+            if "memory" in f.read().split():
+                return True
+    except OSError:
+        pass
+    return os.path.isdir("/sys/fs/cgroup/memory")
+
+
 def _memory_limit_mb() -> Optional[int]:
+    if not _cgroup_memory_available():
+        logger.warning(
+            "cgroup memory controller unavailable — skipping --memory limit; "
+            "a runaway decoder can crash the host. "
+            "On Pi OS add 'cgroup_memory=1 cgroup_enable=memory' to "
+            "/boot/firmware/cmdline.txt and reboot."
+        )
+        return None
     try:
         with open("/proc/meminfo") as f:
             for line in f:
