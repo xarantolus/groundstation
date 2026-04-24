@@ -153,11 +153,11 @@ class DecoderService:
             return
 
         decoder = p.satellite.decoder[decoder_index]
+        # Unnamed decoders write directly into pass_dir; named ones get their
+        # own subdirectory. filter_decoder_outputs ignores the pass-level
+        # recording/info files and sibling decoder subdirs.
         decoder_name = decoder.name or f"decoder_{decoder_index}"
-        # Always write to a per-decoder subdirectory. If we let unnamed
-        # decoders dump into pass_dir we'd pick up recording.bin and info.json
-        # as "decoder outputs" and upload them a second time.
-        output_dir = os.path.join(p.pass_dir, decoder_name)
+        output_dir = p.pass_dir if not decoder.name else os.path.join(p.pass_dir, decoder_name)
 
         if not p.recording_path or not os.path.isfile(p.recording_path):
             error = f"recording file missing at {p.recording_path}"
@@ -207,7 +207,7 @@ class DecoderService:
             )
             return
 
-        surviving = filter_decoder_outputs(output_dir, decoder)
+        surviving = filter_decoder_outputs(output_dir, decoder, pass_dir=p.pass_dir)
         if not surviving:
             p.decoders_failed.append(decoder_index)
             self._state.save_pass(p)

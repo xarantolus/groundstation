@@ -234,31 +234,52 @@ async def run_decoder(
     return process.returncode if process.returncode is not None else -1
 
 
-def filter_decoder_outputs(output_dir: str, decoder: Decoder) -> List[str]:
+_PASS_DIR_PROTECTED = frozenset({"recording.bin", "recording.bin.zst", "info.json"})
+
+
+def filter_decoder_outputs(
+    output_dir: str, decoder: Decoder, pass_dir: Optional[str] = None
+) -> List[str]:
     """Apply min_size_bytes/min_files policy. Returns the surviving file list.
     Enforces decoder.min_size_bytes / min_files to drop runs that produced
-    nothing usable."""
+    nothing usable.
+
+    When ``output_dir`` is the shared pass directory (unnamed decoder) the
+    recording/info files and sibling decoder subdirectories are ignored, and
+    the directory is never rmtree'd on failure."""
     if not os.path.isdir(output_dir):
         return []
-    if decoder.min_size_bytes > 0:
-        for root, _, files in os.walk(output_dir):
-            for name in files:
-                p = os.path.join(root, name)
-                try:
-                    if os.path.getsize(p) < decoder.min_size_bytes:
-                        os.remove(p)
-                        logger.info("removed %s (< min_size_bytes=%d)", p, decoder.min_size_bytes)
-                except OSError:
-                    pass
 
-    files: List[str] = []
-    for root, _, filenames in os.walk(output_dir):
-        for name in filenames:
-            files.append(os.path.join(root, name))
+    shared = pass_dir is not None and os.path.abspath(output_dir) == os.path.abspath(pass_dir)
+
+    def iter_outputs():
+        if shared:
+            for name in os.listdir(output_dir):
+                if name in _PASS_DIR_PROTECTED:
+                    continue
+                full = os.path.join(output_dir, name)
+                if os.path.isfile(full):
+                    yield full
+        else:
+            for root, _, filenames in os.walk(output_dir):
+                for name in filenames:
+                    yield os.path.join(root, name)
+
+    if decoder.min_size_bytes > 0:
+        for path in list(iter_outputs()):
+            try:
+                if os.path.getsize(path) < decoder.min_size_bytes:
+                    os.remove(path)
+                    logger.info("removed %s (< min_size_bytes=%d)", path, decoder.min_size_bytes)
+            except OSError:
+                pass
+
+    files: List[str] = list(iter_outputs())
 
     if len(files) < decoder.min_files:
-        import shutil
+        if not shared:
+            import shutil
 
-        shutil.rmtree(output_dir, ignore_errors=True)
+            shutil.rmtree(output_dir, ignore_errors=True)
         return []
     return files
