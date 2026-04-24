@@ -8,11 +8,32 @@ from common import Decoder, Satellite
 
 RECORDER_IMAGE = "ghcr.io/xarantolus/groundstation/satellite-recorder:latest"
 
+
+def _memory_limit_mb() -> Optional[int]:
+    """Returns ~90% of system RAM in MB, or None if not determinable."""
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    kb = int(line.split()[1])
+                    return int(kb * 0.9 / 1024)
+    except Exception:
+        return None
+    return None
+
+
+_MEMORY_LIMIT_MB = _memory_limit_mb()
+
 COMMON_FLAGS = [
     # Mount /root/.config/gnuradio/prefs to home directory
     "-v",
     f"{os.path.expanduser('~')}/.config/gnuradio/prefs:/root/.config/gnuradio/prefs:z",
 ]
+
+if _MEMORY_LIMIT_MB:
+    # Cap container memory so a runaway decoder gets OOM-killed by podman
+    # rather than taking down the whole Pi.
+    COMMON_FLAGS.extend(["--memory", f"{_MEMORY_LIMIT_MB}m"])
 
 
 def is_root() -> bool:

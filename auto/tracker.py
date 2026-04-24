@@ -853,6 +853,13 @@ class Orchestrator:
                         json.dump({"satellite": sat, "info": p_copy}, f, indent=4)
 
                     if sat.get("decoder"):
+                        # Upload the raw IQ immediately, in parallel with the
+                        # decode queue wait, so a decoder crash / Pi reboot
+                        # doesn't cost us the recording. The transfer worker
+                        # uses keep_source=True — no compression, no local
+                        # copy, and the file stays put for the decoder.
+                        if not sat.get("skip_iq_upload"):
+                            await self.stage_iq_for_upload(tmp_dir, pass_info, sat)
                         await self.decode_manager.add_item(tmp_dir, pass_info, sat)
                         logger.info(f"Queued decoding for {sat['name']}")
                     else:
@@ -864,16 +871,42 @@ class Orchestrator:
             except Exception as e:
                 logger.error(f"Record worker error: {e}")
 
-    async def stage_for_transfer(
-        self, source_dir: str, pass_info: PassInfo, sat: Satellite
-    ):
-        """Stages files for transfer to NAS."""
-        dst_prefix = os.path.join(
+    def _nas_dst_prefix(self, sat: Satellite, pass_info: PassInfo) -> str:
+        return os.path.join(
             self.nas_dir,
             pass_info["start_time"].strftime("%Y"),
             pass_info["start_time"].strftime("%Y-%m-%d"),
             f"{sat['name']}_{pass_info['start_time'].strftime('%Y-%m-%d_%H-%M-%S')}",
         )
+
+    async def stage_iq_for_upload(
+        self, source_dir: str, pass_info: PassInfo, sat: Satellite
+    ):
+        """Queues the raw IQ for upload while keeping the local file intact.
+
+        Uses ``keep_source=True`` so the transfer worker neither compresses nor
+        deletes the file — the decoder still reads from the same path.
+        """
+        iq_path = os.path.join(source_dir, "recording.bin")
+        if not os.path.isfile(iq_path):
+            return
+        dst = os.path.join(self._nas_dst_prefix(sat, pass_info), "recording.bin")
+        await self.transfer_manager.add_item(iq_path, dst, 0, keep_source=True)
+        logger.info(f"Queued IQ pre-upload for {sat['name']}")
+
+    async def stage_for_transfer(
+        self,
+        source_dir: str,
+        pass_info: PassInfo,
+        sat: Satellite,
+        iq_already_queued: bool = False,
+    ):
+        """Stages files for transfer to NAS.
+
+        When ``iq_already_queued`` is True, the raw IQ file was pre-uploaded
+        (keep_source path) and this call is just handling decoder outputs.
+        """
+        dst_prefix = self._nas_dst_prefix(sat, pass_info)
 
         queued_count = 0
         for root, _, files in os.walk(source_dir):
@@ -884,11 +917,19 @@ class Orchestrator:
                     dst_prefix, file if rel == "." else os.path.join(rel, file)
                 )
 
-                if sat.get("skip_iq_upload") and file.endswith(IQ_DATA_FILE_EXTENSION):
+                is_iq = file.endswith(IQ_DATA_FILE_EXTENSION)
+
+                if sat.get("skip_iq_upload") and is_iq:
                     try:
                         os.remove(src)
                     except Exception:
                         pass
+                    continue
+
+                # The IQ was already uploaded by stage_iq_for_upload; we handle
+                # local cleanup separately in decode_worker once the upload is
+                # actually done.
+                if iq_already_queued and is_iq:
                     continue
 
                 await self.transfer_manager.add_item(src, dst, 0)
@@ -958,7 +999,31 @@ class Orchestrator:
                         logger.error(f"Decoder error for {sat['name']}: {e}")
 
                 self.tui.is_decoding = False
-                await self.stage_for_transfer(pass_dir, pass_info, sat)
+
+                # If the IQ was pre-uploaded, wait for that transfer to finish
+                # (it was running in parallel with decoding) and then drop the
+                # local copy. On failure, leave the file for the 24h /tmp cron
+                # so we at least keep the on-disk data until then.
+                iq_pre_uploaded = bool(
+                    sat.get("decoder") and not sat.get("skip_iq_upload")
+                )
+                if iq_pre_uploaded:
+                    iq_path = os.path.join(pass_dir, "recording.bin")
+                    if os.path.isfile(iq_path):
+                        ok = await self.transfer_manager.wait_for_upload(iq_path)
+                        if ok:
+                            try:
+                                os.remove(iq_path)
+                            except Exception as e:
+                                logger.warning(f"Could not remove uploaded IQ {iq_path}: {e}")
+                        else:
+                            logger.warning(
+                                f"IQ upload for {sat['name']} not confirmed; leaving {iq_path} in place"
+                            )
+
+                await self.stage_for_transfer(
+                    pass_dir, pass_info, sat, iq_already_queued=iq_pre_uploaded
+                )
 
                 # Remove from persistent queue only after success/attempt
                 await self.decode_manager.remove_item(item)

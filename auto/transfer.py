@@ -1,4 +1,4 @@
-from typing import Tuple, Dict, Any, Optional, Callable
+from typing import Tuple, Dict, Any, Optional, Callable, List, Set
 import logging
 import os
 import pickle
@@ -8,8 +8,18 @@ import collections
 
 from common import IQ_DATA_FILE_EXTENSION
 
-# Type alias for a transfer item: (source_path, destination_path, attempt_nr)
-TransferItem = Tuple[str, str, int]
+# Type alias for a transfer item: (source_path, destination_path, attempt_nr, keep_source)
+# keep_source=True means: don't compress, and don't delete source after upload
+# (used when another process — e.g. the decoder — still needs the local file).
+TransferItem = Tuple[str, str, int, bool]
+
+
+def _normalize_item(item: tuple) -> TransferItem:
+    """Normalizes legacy 3-tuple items loaded from older pickle state."""
+    if len(item) >= 4:
+        return (item[0], item[1], item[2], bool(item[3]))
+    src, dst, attempt = item
+    return (src, dst, attempt, False)
 
 
 class TransferQueueManager:
@@ -25,6 +35,10 @@ class TransferQueueManager:
         self.completed_transfers = collections.deque(
             maxlen=10
         )  # Track last 10 completed
+        # Source paths that have finished uploading successfully — used so callers
+        # (e.g. the decoder pipeline) can know when it's safe to delete a
+        # keep_source file locally.
+        self.succeeded_uploads: Set[str] = set()
         self.on_progress_update: Optional[Callable[[], None]] = None
 
         # Load any previously queued items at startup
@@ -42,10 +56,14 @@ class TransferQueueManager:
 
 
     async def add_item(
-        self, source_path: str, destination_path: str, attempt_nr: int = 0
+        self,
+        source_path: str,
+        destination_path: str,
+        attempt_nr: int = 0,
+        keep_source: bool = False,
     ) -> bool:
         """Add an item to the transfer queue and update state file"""
-        item = (source_path, destination_path, attempt_nr)
+        item: TransferItem = (source_path, destination_path, attempt_nr, keep_source)
 
         async with self._lock:
             await self._queue.put(item)
@@ -57,6 +75,24 @@ class TransferQueueManager:
             f"Added to transfer queue: {os.path.basename(source_path)} -> {destination_path}"
         )
         return True
+
+    async def wait_for_upload(
+        self, source_path: str, timeout: float = 1800
+    ) -> bool:
+        """Waits until ``source_path`` is no longer queued or being uploaded.
+
+        Returns True if the upload succeeded, False if it was given up on or
+        the timeout elapsed.
+        """
+        start = time.time()
+        while time.time() - start < timeout:
+            async with self._lock:
+                in_queue = any(i[0] == source_path for i in self._items)
+            in_active = source_path in self.active_transfers
+            if not in_queue and not in_active:
+                return source_path in self.succeeded_uploads
+            await asyncio.sleep(2)
+        return source_path in self.succeeded_uploads
 
     async def get_next_item(self) -> TransferItem:
         """Get the next item from the queue (doesn't modify state file)"""
@@ -135,9 +171,11 @@ class TransferQueueManager:
         try:
             if os.path.exists(self.state_file_path):
                 with open(self.state_file_path, "rb") as f:
-                    self._items = pickle.load(f)
+                    raw_items = pickle.load(f)
 
-                # Add any loaded items to the queue
+                # Migrate any legacy 3-tuples to the new 4-tuple shape
+                self._items = [_normalize_item(i) for i in raw_items]
+
                 for item in self._items:
                     self._queue.put_nowait(item)
 
@@ -183,16 +221,36 @@ def copy_with_progress(
     loop: asyncio.AbstractEventLoop,
     buffer_size: int = 32 * 1024,
 ) -> None:
-    """Copies a file while reporting progress to the manager. Runs in thread executor."""
+    """Copies a file while reporting progress to the manager. Runs in thread executor.
+
+    Resumes from a partial ``dst`` if one is already present and smaller than
+    ``src``. This lets a reboot mid-upload continue rather than retransfer the
+    entire IQ recording over the slow NAS link.
+    """
     total_size = os.path.getsize(src)
-    copied = 0
 
     os.makedirs(os.path.dirname(dst), exist_ok=True)
+
+    start_offset = 0
+    if os.path.exists(dst):
+        existing = os.path.getsize(dst)
+        if 0 < existing < total_size:
+            start_offset = existing
+            logging.info(
+                f"Resuming upload of {os.path.basename(src)} "
+                f"from {start_offset / (1024 * 1024):.1f} MB / {total_size / (1024 * 1024):.1f} MB"
+            )
+
+    copied = start_offset
+    open_mode = "ab" if start_offset > 0 else "wb"
 
     def report_progress(c, t):
         asyncio.run_coroutine_threadsafe(manager.update_progress(src, c, t), loop)
 
-    with open(src, "rb") as fsrc, open(dst, "wb") as fdst:
+    with open(src, "rb") as fsrc, open(dst, open_mode) as fdst:
+        if start_offset > 0:
+            fsrc.seek(start_offset)
+            report_progress(copied, total_size)
         while True:
             buf = fsrc.read(buffer_size)
             if not buf:
@@ -237,9 +295,12 @@ async def file_transfer_worker(transfer_queue: TransferQueueManager):
         source_path = ""
         destination_path = ""
         attempt_nr = 0
+        keep_source = False
         try:
             item = await transfer_queue.get_next_item()
-            source_path, destination_path, attempt_nr = item
+            item = _normalize_item(item)
+            source_path, destination_path, attempt_nr, keep_source = item
+            original_item = item
             original_source_path = source_path
             original_destination_path = destination_path
 
@@ -252,14 +313,20 @@ async def file_transfer_worker(transfer_queue: TransferQueueManager):
                 transfer_queue.task_done()
                 continue
 
-            # Compression
-            if source_path.endswith(IQ_DATA_FILE_EXTENSION):
+            # Compression — skipped for keep_source items because compression
+            # deletes the source and we need it available for the decoder.
+            if source_path.endswith(IQ_DATA_FILE_EXTENSION) and not keep_source:
                 try:
                     compressed_path = await compress_file(source_path)
 
                     # Update entry in queue (persist state)
                     # Note: We are NOT putting it back in queue to be picked up again, just updating tracking
-                    new_item = (compressed_path, destination_path + ".zst", attempt_nr)
+                    new_item: TransferItem = (
+                        compressed_path,
+                        destination_path + ".zst",
+                        attempt_nr,
+                        keep_source,
+                    )
                     await transfer_queue.update_item(item, new_item)
 
                     source_path = compressed_path
@@ -303,8 +370,11 @@ async def file_transfer_worker(transfer_queue: TransferQueueManager):
                     else:
                         raise e  # Re-raise after last attempt
 
-            # After copy, remove source
-            os.remove(source_path)
+            # After copy, remove the (possibly compressed) source — unless the
+            # caller asked us to keep it (e.g. because a decoder still needs
+            # the same file locally).
+            if not keep_source:
+                os.remove(source_path)
 
             end_time = time.time()
             transfer_duration_seconds = end_time - start_time
@@ -323,9 +393,8 @@ async def file_transfer_worker(transfer_queue: TransferQueueManager):
 
             # Remove from tracking list once completed
             transfer_queue.add_completed_transfer(os.path.basename(destination_path))
-            await transfer_queue.remove_item(
-                (original_source_path, original_destination_path, attempt_nr)
-            )
+            transfer_queue.succeeded_uploads.add(original_source_path)
+            await transfer_queue.remove_item(original_item)
             await transfer_queue.end_transfer(source_path)
             transfer_queue.task_done()
 
@@ -345,11 +414,13 @@ async def file_transfer_worker(transfer_queue: TransferQueueManager):
                 # The original code had attempt_nr.
                 # Let's keep it but maybe increase delay.
 
-                new_attempt = (source_path, destination_path, attempt_nr + 1)
-                await transfer_queue.remove_item(
-                    (original_source_path, original_destination_path, attempt_nr)
+                await transfer_queue.remove_item(original_item)
+                await transfer_queue.add_item(
+                    source_path,
+                    destination_path,
+                    attempt_nr + 1,
+                    keep_source=keep_source,
                 )
-                await transfer_queue.add_item(*new_attempt)
 
                 logging.info(
                     f"Transfer task failed. Re-queued for retry {attempt_nr + 2}."
@@ -359,18 +430,19 @@ async def file_transfer_worker(transfer_queue: TransferQueueManager):
                 logging.error(
                     f"Failed to transfer file after multiple attempts: {os.path.basename(destination_path)}"
                 )
-                await transfer_queue.remove_item(
-                    (original_source_path, original_destination_path, attempt_nr)
-                )
+                await transfer_queue.remove_item(original_item)
 
-                # Delete the file if transfer fails
-                try:
-                    os.remove(source_path)
-                    logging.info(f"Deleted file after failed transfer: {source_path}")
-                except Exception as ex:
-                    logging.error(
-                        f"Error deleting file after failed transfer: {str(ex)}"
-                    )
+                # Delete the file if transfer fails — but keep it when someone
+                # else (the decoder) is still depending on it. Leaving it in
+                # place also means the 24h /tmp cron will clean up eventually.
+                if not keep_source:
+                    try:
+                        os.remove(source_path)
+                        logging.info(f"Deleted file after failed transfer: {source_path}")
+                    except Exception as ex:
+                        logging.error(
+                            f"Error deleting file after failed transfer: {str(ex)}"
+                        )
 
         # If the dir is empty, remove it
         if source_path:
