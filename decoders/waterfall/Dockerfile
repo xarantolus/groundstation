@@ -1,9 +1,20 @@
-FROM alpine:latest
+FROM python:3.13-slim
 
-RUN apk add --no-cache \
-	ffmpeg
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
-COPY waterfall.sh /usr/local/bin/waterfall.sh
-RUN chmod +x /usr/local/bin/waterfall.sh
+WORKDIR /app
 
-ENTRYPOINT [ "/usr/local/bin/waterfall.sh" ]
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
+
+COPY waterfall.py waterfall.sh ./
+RUN chmod +x waterfall.sh
+
+ENV PATH="/app/.venv/bin:$PATH"
+
+ENV MPLCONFIGDIR=/opt/mpl
+RUN mkdir -p /opt/mpl && \
+    python -c "import matplotlib; matplotlib.use('Agg'); \
+import matplotlib.pyplot as plt; f=plt.figure(); plt.plot([0,1],[0,1]); plt.close(f)"
+
+ENTRYPOINT ["/app/waterfall.sh"]

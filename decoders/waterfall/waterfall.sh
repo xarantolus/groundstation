@@ -1,17 +1,17 @@
 #!/usr/bin/env sh
-set -euox
+set -eu
 
-# See https://ffmpeg.org/ffmpeg-filters.html#showspectrumpic
-ffmpeg -y \
-  -f f32le -ar "$SAMP_RATE" -ac 2 -i "$INPUT_FILE" \
-  -lavfi "showspectrumpic=\
-s=${WIDTH:-600}x${HEIGHT:-2000}:\
-mode=combined:\
-color=intensity:\
-orientation=horizontal:\
-scale=log:\
-fscale=log:\
-legend=1\
-" \
-  -frames:v 1 \
-  "$OUTPUT_DIR/waterfall.png"
+: "${INPUT_FILE:?INPUT_FILE is required}"
+: "${OUTPUT_DIR:?OUTPUT_DIR is required}"
+: "${SAMP_RATE:?SAMP_RATE is required}"
+
+mkdir -p "$OUTPUT_DIR"
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+exec python3 "$SCRIPT_DIR/waterfall.py" \
+  "$INPUT_FILE" \
+  "$OUTPUT_DIR/waterfall.png" \
+  --samp-rate "$SAMP_RATE" \
+  --center-freq "${FREQUENCY:-0}" \
+  --bandwidth "${BANDWIDTH:-0}"
