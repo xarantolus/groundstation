@@ -15,6 +15,9 @@ from .state import StateStore
 from .transfer import compress_file
 
 logger = logging.getLogger("groundstation.decoder")
+# Dedicated file logger for raw container stdout/stderr — configured in
+# main._setup_logging with its own FileHandler and propagate=False.
+_decoder_output_logger = logging.getLogger("groundstation.decoders.output")
 
 
 class DecoderService:
@@ -180,6 +183,11 @@ class DecoderService:
         loop = asyncio.get_running_loop()
 
         def on_log(line: str) -> None:
+            stripped = line.rstrip("\r\n")
+            if stripped:
+                _decoder_output_logger.info(
+                    "[%s %s] %s", pass_id, decoder_name, stripped
+                )
             loop.create_task(
                 self._bus.publish(
                     E.DecodeLog(pass_id=pass_id, decoder_index=decoder_index, line=line)

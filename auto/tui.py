@@ -51,7 +51,13 @@ class _TUIRenderable:
         self._view = view
         self._layout = Layout()
         self._layout.split(Layout(name="top", size=15), Layout(name="bottom"))
-        self._layout["top"].split_row(Layout(name="passes", ratio=3), Layout(name="transfers", ratio=1))
+        self._layout["top"].split_row(Layout(name="passes", ratio=3), Layout(name="right", ratio=1))
+        # Borderless one-line "N decoder(s) waiting" hint sits directly under
+        # the transfers panel — size=1 reserves exactly one row for it.
+        self._layout["right"].split_column(
+            Layout(name="transfers"),
+            Layout(name="pending_decoders", size=1),
+        )
         self._layout["bottom"].split_row(Layout(name="main_log"), Layout(name="decoder_log"))
 
     def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
@@ -59,6 +65,10 @@ class _TUIRenderable:
         snap = self._view.snapshot()
         self._layout["passes"].update(self._passes_table(snap))
         self._layout["transfers"].update(self._transfers_panel(snap))
+        show_pending = bool(snap.pending_decoders) and snap.decoding is None
+        self._layout["pending_decoders"].visible = show_pending
+        if show_pending:
+            self._layout["pending_decoders"].update(self._pending_decoders_line(snap))
         self._layout["main_log"].update(self._log_panel(snap))
         if snap.decoding:
             self._layout["decoder_log"].visible = True
@@ -113,19 +123,15 @@ class _TUIRenderable:
 
     def _transfers_panel(self, snap) -> Panel:
         lines = []
-        if snap.pending_decoders and not snap.decoding:
-            lines.append(
-                f"[yellow]{snap.pending_decoders} decoder(s) waiting[/yellow]"
-            )
-            lines.append("")
         if snap.active_transfers:
-            for t in snap.active_transfers:
-                label = t.label or os.path.basename(t.source_path)
-                bar_len = 16
-                filled = int(t.progress / 100 * bar_len)
-                bar = "█" * filled + "░" * (bar_len - filled)
-                lines.append(f"{label}")
-                lines.append(f"[{bar}] {t.progress:>3.0f}%")
+            count = len(snap.active_transfers)
+            # `total` is populated by ViewModel on TransferStarted (one stat)
+            # and refreshed by TransferProgress — summing here is O(count).
+            total_bytes = sum(t.total for t in snap.active_transfers)
+            if total_bytes > 0:
+                lines.append(f"{count} item(s) queued ({_format_bytes(total_bytes)})")
+            else:
+                lines.append(f"{count} item(s) queued")
         else:
             lines.append("[dim]no active transfers[/dim]")
 
@@ -140,6 +146,13 @@ class _TUIRenderable:
                 lines.append(f"[{color}]{mark} {label}[/{color}] [dim]({ts})[/dim]")
 
         return Panel(Group(*[Text.from_markup(l) for l in lines]), title="Transfers")
+
+    def _pending_decoders_line(self, snap) -> Text:
+        if snap.pending_decoders and not snap.decoding:
+            return Text.from_markup(
+                f"[yellow]{snap.pending_decoders} decoder(s) waiting[/yellow]"
+            )
+        return Text("")
 
     def _log_panel(self, snap) -> Panel:
         lines = [
@@ -212,3 +225,14 @@ def _level_style(level: str) -> str:
         "INFO": "",
         "DEBUG": "dim",
     }.get(level.upper(), "")
+
+
+def _format_bytes(n: float) -> str:
+    if n < 1024:
+        return f"{int(n)} B"
+    n /= 1024
+    for unit in ("KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"

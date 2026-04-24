@@ -3,6 +3,7 @@ from __future__ import annotations
 import collections
 import datetime
 import logging
+import os
 import threading
 from typing import Deque, Dict, List, Optional, Set, Tuple
 
@@ -159,11 +160,22 @@ class ViewModel:
         elif isinstance(event, E.DecodeGateStateChanged):
             self.gate = GateState(open=event.open, reason=event.reason)
         elif isinstance(event, E.TransferStarted):
+            # Stat once at start so the TUI/Web summary can show total queued
+            # bytes without statting every refresh. Progress events will
+            # overwrite `total` with the actual byte count once copying begins
+            # (which may differ for items that compress before upload).
+            total = 0
+            try:
+                if event.source_path:
+                    total = os.path.getsize(event.source_path)
+            except OSError:
+                pass
             self.active_transfers[event.request_id] = TransferView(
                 request_id=event.request_id,
                 source_path=event.source_path,
                 destination_path=event.destination_path,
                 label=event.label,
+                total=total,
             )
         elif isinstance(event, E.TransferProgress):
             existing = self.active_transfers.get(event.request_id)

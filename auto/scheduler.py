@@ -157,8 +157,13 @@ class SchedulerService:
             task = self._monitors.pop(dead_id, None)
             if task and not task.done():
                 task.cancel()
-            if p.status == PassStatus.PREDICTED:
-                self._state.delete_pass(p.id)
+            # Always delete the on-disk JSON for dropped passes. Terminal
+            # passes (DONE/FAILED/RECORDED_PARTIAL) were previously left on
+            # disk, slowly accumulating one file per completed pass.
+            # Transfers outlive the pass record (they have their own queue
+            # keyed by req.id), so dropping the pass JSON is safe even if
+            # the NAS upload hasn't finished.
+            self._state.delete_pass(p.id)
 
         # Every still-future PREDICTED pass (including recovered ones whose
         # pid doesn't match the fresh prediction) must have a live monitor.
@@ -226,10 +231,23 @@ class SchedulerService:
             p for p in self._known_passes.values() if p.pass_info.start_time > now
         ]
         upcoming.sort(key=lambda p: p.pass_info.start_time)
+        prev_id = self._next_pass_id
         if not upcoming:
             self._next_pass_id = None
             self._gate.on_next_pass(None, None)
+            if prev_id is not None:
+                logger.info("no upcoming passes")
             return
         head = upcoming[0]
         self._next_pass_id = head.id
         self._gate.on_next_pass(head.pass_info.start_time, head.pass_info.end_time)
+        if head.id != prev_id:
+            delta = head.pass_info.start_time - now
+            mins = max(0, int(delta.total_seconds() // 60))
+            logger.info(
+                "next pass: %s at %s (in %dm, max el %.1f°)",
+                head.satellite.name,
+                head.pass_info.start_time.strftime("%Y-%m-%d %H:%M:%S"),
+                mins,
+                head.pass_info.max_elevation,
+            )

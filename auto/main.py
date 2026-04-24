@@ -36,13 +36,40 @@ from typing import Optional
 logger = logging.getLogger("groundstation")
 
 
+def _rotate_log(path: str) -> None:
+    """Move `foo.log` → `foo.old.log` so we keep exactly the current boot's
+    log plus the previous one. Called before handlers are attached — opening
+    the new file after the rename creates it fresh. os.replace is atomic and
+    overwrites any existing `foo.old.log`."""
+    if not os.path.exists(path):
+        return
+    old = path[:-4] + ".old.log" if path.endswith(".log") else path + ".old"
+    try:
+        os.replace(path, old)
+    except OSError:
+        logging.getLogger("groundstation").exception("could not rotate %s", path)
+
+
 def _setup_logging() -> None:
+    _rotate_log("tracker.log")
+    _rotate_log("decoders.log")
+
     root = logging.getLogger()
     root.setLevel(logging.INFO)
 
     fh = logging.FileHandler("tracker.log", encoding="utf-8")
     fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
     root.addHandler(fh)
+
+    # Container stdout/stderr for decoders goes here via DecoderService.on_log.
+    # propagate=False keeps it out of tracker.log and the bus — otherwise every
+    # line would also land in the main log and the UI's main log panel.
+    decoder_fh = logging.FileHandler("decoders.log", encoding="utf-8")
+    decoder_fh.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+    decoder_logger = logging.getLogger("groundstation.decoders.output")
+    decoder_logger.addHandler(decoder_fh)
+    decoder_logger.propagate = False
+    decoder_logger.setLevel(logging.INFO)
 
 
 def _attach_bus_logging(bus: EventBus, loop: asyncio.AbstractEventLoop) -> None:
@@ -244,6 +271,21 @@ async def _run(cfg: GroundstationConfig, no_tui: bool) -> None:
     view = ViewModel()
 
     passes_by_id, extra_transfers = _boot_recovery(cfg, state)
+
+    # Compact the JSONL logs once per boot. `_boot_recovery` may have just
+    # appended new `put` entries; compaction runs AFTER it so those are
+    # preserved. Services load the queues in their constructors below, so
+    # they'll read the compacted files.
+    dropped_transfers = state.compact_transfer_queue()
+    dropped_decodes = state.compact_decode_queue()
+    dropped_completed = state.compact_completed(keep_last=200)
+    if dropped_transfers or dropped_decodes or dropped_completed:
+        logger.info(
+            "state compaction: dropped %d transfer log line(s), %d decode log line(s), %d completed-history line(s)",
+            dropped_transfers,
+            dropped_decodes,
+            dropped_completed,
+        )
 
     # Subscribe the view keeper BEFORE constructing anything that publishes
     # initial events (the gate emits its starting state at construction).

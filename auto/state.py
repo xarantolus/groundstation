@@ -58,6 +58,21 @@ def _atomic_append_line(path: Path, text: str) -> None:
         _fsync_dir(path.parent)
 
 
+def _atomic_rewrite_jsonl(path: Path, entries: Iterable[Dict]) -> None:
+    """Replace `path` with one JSON line per entry. Written to a sibling .tmp
+    then renamed — a crash mid-write leaves the previous (uncompacted) file
+    intact rather than a truncated one."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        for entry in entries:
+            f.write(json.dumps(entry, default=_json_default) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+    _fsync_dir(path.parent)
+
+
 class StateStore:
     """Owns all on-disk persistence. JSON + JSONL, atomic writes.
 
@@ -196,6 +211,65 @@ class StateStore:
         entries = self._read_jsonl(self.transfer_completed_log)
         return entries[-limit:]
 
+    # ---------- Compaction ----------
+
+    def compact_transfer_queue(self) -> int:
+        """Rewrite transfer_queue.jsonl to hold only one `put` line per open
+        request. Returns the number of lines dropped (0 if the file did not
+        exist or was already minimal)."""
+        if not self.transfer_queue_log.exists():
+            return 0
+        before = _count_lines(self.transfer_queue_log)
+        open_reqs = self.load_transfer_queue()
+        entries = [
+            {"op": "put", "req": r.model_dump(mode="json")} for r in open_reqs
+        ]
+        if len(entries) >= before:
+            return 0
+        try:
+            _atomic_rewrite_jsonl(self.transfer_queue_log, entries)
+        except OSError:
+            logger.exception("transfer queue compaction failed")
+            return 0
+        return before - len(entries)
+
+    def compact_decode_queue(self) -> int:
+        """Rewrite pending_decodes.jsonl to hold only one `put` line per open
+        (pass_id, decoder_index). Returns the number of lines dropped."""
+        if not self.pending_decodes_log.exists():
+            return 0
+        before = _count_lines(self.pending_decodes_log)
+        open_keys = self.load_decode_queue()
+        entries = [
+            {"op": "put", "pass_id": pid, "decoder_index": idx}
+            for (pid, idx) in open_keys
+        ]
+        if len(entries) >= before:
+            return 0
+        try:
+            _atomic_rewrite_jsonl(self.pending_decodes_log, entries)
+        except OSError:
+            logger.exception("decode queue compaction failed")
+            return 0
+        return before - len(entries)
+
+    def compact_completed(self, keep_last: int = 200) -> int:
+        """Truncate transfer_completed.jsonl to the last `keep_last` lines.
+        Returns the number of lines dropped."""
+        if not self.transfer_completed_log.exists():
+            return 0
+        entries = self._read_jsonl(self.transfer_completed_log)
+        before = len(entries)
+        if before <= keep_last:
+            return 0
+        kept = entries[-keep_last:]
+        try:
+            _atomic_rewrite_jsonl(self.transfer_completed_log, kept)
+        except OSError:
+            logger.exception("completed log compaction failed")
+            return 0
+        return before - len(kept)
+
     # ---------- helpers ----------
 
     def _append_log(self, path: Path, payload: Dict) -> None:
@@ -237,23 +311,9 @@ def _json_default(obj: object) -> object:
     raise TypeError(f"not JSON serializable: {type(obj)!r}")
 
 
-def compact_jsonl(path: Path, keep: Iterable[str]) -> None:
-    """Optional periodic compaction for JSONL queues. Writes a fresh log
-    containing only open entries. Not wired up automatically; call from a
-    maintenance task if the logs grow large."""
-    keep_set = set(keep)
-    if not path.exists():
-        return
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    kept = 0
-    with open(path, "r", encoding="utf-8") as src, open(tmp, "w", encoding="utf-8") as dst:
-        for line in src:
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if entry.get("id") in keep_set or entry.get("pass_id") in keep_set:
-                dst.write(line)
-                kept += 1
-    os.replace(tmp, path)
-    logger.info("compacted %s: kept %d entries", path, kept)
+def _count_lines(path: Path) -> int:
+    try:
+        with open(path, "rb") as f:
+            return sum(1 for _ in f)
+    except OSError:
+        return 0
