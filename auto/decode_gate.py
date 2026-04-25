@@ -42,6 +42,7 @@ class DecodeGate:
 
         self._cpu_lock = asyncio.Lock()
         self._closed = False
+        self._active_kill: Optional[asyncio.Event] = None
 
         self._reevaluate()
 
@@ -49,12 +50,17 @@ class DecodeGate:
         await self._open.wait()
 
     @contextlib.asynccontextmanager
-    async def cpu_slot(self) -> AsyncIterator[None]:
+    async def cpu_slot(self) -> AsyncIterator[asyncio.Event]:
         """Wait for the gate to open, then take the single CPU slot —
         decoders/compressors all serialise on this so they don't fight for
         the Pi's cores. Re-checks the gate after acquiring the lock in case
-        a recording or upcoming pass arrived while we were queueing."""
+        a recording or upcoming pass arrived while we were queueing.
+
+        Yields a kill ``asyncio.Event`` that gets set when the recorder
+        starts mid-run — callers should pass it through to their subprocess
+        so that compression / decoding can be terminated and re-queued."""
         acquired = False
+        kill = asyncio.Event()
         try:
             while True:
                 await self._open.wait()
@@ -64,8 +70,10 @@ class DecodeGate:
                     break
                 self._cpu_lock.release()
                 acquired = False
-            yield
+            self._active_kill = kill
+            yield kill
         finally:
+            self._active_kill = None
             if acquired:
                 self._cpu_lock.release()
 
@@ -78,6 +86,8 @@ class DecodeGate:
 
     def on_recording(self, recording: bool) -> None:
         self._recording = recording
+        if recording and self._active_kill is not None:
+            self._active_kill.set()
         self._reevaluate()
 
     def on_next_pass(

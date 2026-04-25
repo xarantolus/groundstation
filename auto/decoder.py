@@ -227,17 +227,14 @@ class DecoderService:
         before = _snapshot_dir(output_dir)
         is_shared_dir = output_dir == p.pass_dir
 
-        kill_event = asyncio.Event()
         self._active_key = (pass_id, decoder_index, attempt)
-        self._active_kill_event = kill_event
 
         rc: int = -1
         crash_error: Optional[str] = None
         try:
-            async with self._gate.cpu_slot():
+            async with self._gate.cpu_slot() as kill_event:
+                self._active_kill_event = kill_event
                 if self._stop.is_set():
-                    self._active_key = None
-                    self._active_kill_event = None
                     self._enqueue((pass_id, decoder_index, attempt), front=True)
                     return
                 rc = await run_decoder(
@@ -263,8 +260,13 @@ class DecoderService:
         if rc == DECODER_KILLED_BY_STOP:
             _cleanup_new(output_dir, before, protect_shared=is_shared_dir)
             if self._stop.is_set():
-                # Service shutdown — leave the persisted entry alone so boot
-                # recovery picks it up next run.
+                await self._bus.publish(
+                    E.DecodeFailed(
+                        pass_id=pass_id,
+                        decoder_index=decoder_index,
+                        error="service stopped",
+                    )
+                )
                 return
             logger.info(
                 "decoder %s/%s killed by recorder — re-queued at front (attempt %d unchanged)",
@@ -273,6 +275,16 @@ class DecoderService:
                 attempt,
             )
             self._enqueue((pass_id, decoder_index, attempt), front=True)
+            await self._bus.publish(
+                E.DecodeFailed(
+                    pass_id=pass_id,
+                    decoder_index=decoder_index,
+                    error="killed by recorder, will retry",
+                )
+            )
+            await self._bus.publish(
+                E.DecodeQueued(pass_id=pass_id, decoder_index=decoder_index)
+            )
             return
 
         if crash_error is not None or rc != 0:
@@ -294,6 +306,9 @@ class DecoderService:
                     E.DecodeFailed(
                         pass_id=pass_id, decoder_index=decoder_index, error=error_text
                     )
+                )
+                await self._bus.publish(
+                    E.DecodeQueued(pass_id=pass_id, decoder_index=decoder_index)
                 )
                 return
             p.decoders_failed.append(decoder_index)
@@ -391,8 +406,8 @@ class DecoderService:
                     logger.exception("could not remove IQ %s", iq)
             else:
                 try:
-                    async with self._gate.cpu_slot():
-                        compressed = await compress_file(iq)
+                    async with self._gate.cpu_slot() as kill_event:
+                        compressed = await compress_file(iq, stop_event=kill_event)
                     try:
                         os.remove(iq)
                         logger.info(

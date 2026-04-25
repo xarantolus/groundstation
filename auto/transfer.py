@@ -150,14 +150,21 @@ class TransferService:
         if req.compress and working_source.endswith(IQ_DATA_FILE_EXTENSION) and not req.keep_source:
             try:
                 if self._gate is not None:
-                    async with self._gate.cpu_slot():
+                    async with self._gate.cpu_slot() as kill_event:
                         if self._stop.is_set():
                             return
-                        working_source = await compress_file(working_source)
+                        working_source = await compress_file(working_source, stop_event=kill_event)
                 else:
                     working_source = await compress_file(working_source)
                 if not working_dest.endswith(".zst"):
                     working_dest = working_dest + ".zst"
+            except CompressionInterrupted:
+                logger.info(
+                    "compression of %s interrupted by recorder — re-queueing",
+                    original_source,
+                )
+                await self._bus.publish(E.TransferQueued(request=req))
+                return
             except Exception as e:
                 if _is_disk_full(e):
                     # Disk full: re-queue with long backoff. Falling through to
@@ -410,7 +417,15 @@ def _copy_with_progress_sync(
             report(copied, total)
 
 
-async def compress_file(source_path: str) -> str:
+class CompressionInterrupted(Exception):
+    """Raised when compress_file's stop_event was signalled mid-run (e.g.
+    the recorder started). The partial output has been cleaned up; the
+    caller should re-queue the work."""
+
+
+async def compress_file(
+    source_path: str, stop_event: Optional[asyncio.Event] = None
+) -> str:
     """Stream-compresses ``source_path`` to ``.zst`` via the system ``zstd``
     binary.
 
@@ -437,7 +452,47 @@ async def compress_file(source_path: str) -> str:
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.PIPE,
     )
-    _, err = await proc.communicate()
+
+    comm_task = asyncio.create_task(proc.communicate())
+    waiters: List[asyncio.Future] = [comm_task]
+    stop_task: Optional[asyncio.Task] = None
+    if stop_event is not None:
+        stop_task = asyncio.create_task(stop_event.wait())
+        waiters.append(stop_task)
+
+    interrupted = False
+    try:
+        done, _ = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+        if stop_task is not None and stop_task in done and comm_task not in done:
+            interrupted = True
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            await asyncio.gather(comm_task, return_exceptions=True)
+    except asyncio.CancelledError:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        await asyncio.gather(comm_task, return_exceptions=True)
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+    finally:
+        if stop_task is not None and not stop_task.done():
+            stop_task.cancel()
+
+    if interrupted:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise CompressionInterrupted("zstd killed by stop_event")
+
+    _, err = comm_task.result()
     if proc.returncode != 0:
         try:
             os.remove(tmp)

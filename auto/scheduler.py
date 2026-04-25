@@ -21,6 +21,13 @@ def _build_pass_dir(pass_id: str) -> str:
     return f"{base}/recorder-{pass_id}"
 
 
+# Start the recorder this many seconds before the official pass start time
+# (when the satellite crosses the elevation threshold) so the podman container
+# is up by the time the satellite is in view. Recorder.py records for the
+# matching trail past end_time, see recorder.RECORDING_TRAIL_SECONDS.
+RECORDING_LEAD_SECONDS = 30
+
+
 class SchedulerService:
     """Predicts upcoming passes and emits pass lifecycle events.
 
@@ -234,12 +241,13 @@ class SchedulerService:
                     )
                 )
 
+            record_at = p.pass_info.start_time - datetime.timedelta(seconds=RECORDING_LEAD_SECONDS)
             now = datetime.datetime.now()
-            delay = (p.pass_info.start_time - now).total_seconds()
+            delay = (record_at - now).total_seconds()
             if delay > 0:
                 await asyncio.sleep(delay)
             if p.pass_info.end_time <= datetime.datetime.now():
-                logger.warning("pass %s already ended by start_time — skipping", p.id)
+                logger.warning("pass %s already ended by recorder-start time — skipping", p.id)
                 return
 
             if self._known_passes.get(p.id) is not p:

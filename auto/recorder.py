@@ -16,6 +16,11 @@ from .state import StateStore
 
 logger = logging.getLogger("groundstation.recorder")
 
+# Keep recording this many seconds past pass end_time. Combined with
+# scheduler.RECORDING_LEAD_SECONDS, gives ~30s of margin on each side of the
+# official pass window.
+RECORDING_TRAIL_SECONDS = 30
+
 
 class RecorderService:
     """One recording at a time. Subscribes to PassStarted; runs the podman
@@ -96,7 +101,8 @@ class RecorderService:
             )
 
         now = datetime.datetime.now()
-        record_minutes = (p.pass_info.end_time - now).total_seconds() / 60
+        record_until = p.pass_info.end_time + datetime.timedelta(seconds=RECORDING_TRAIL_SECONDS)
+        record_minutes = (record_until - now).total_seconds() / 60
         if record_minutes < 0.5:
             await self._fail(p, "pass already ended at start")
             return
@@ -104,7 +110,7 @@ class RecorderService:
         try:
             path = await run_recorder(
                 p.satellite,
-                record_minutes + 1,
+                record_minutes,
                 p.pass_dir,
                 log_callback=on_log,
             )
