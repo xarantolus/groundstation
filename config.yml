@@ -290,7 +290,6 @@ satellites:
     norad: 67290
     frequency: 437.350e6
     bandwidth: 384e3
-    gain: 40
     sample_rate: 384e3
     lo_offset: 100e3
     priority: 2
@@ -306,7 +305,6 @@ satellites:
     norad: 67284
     frequency: 436.320e6
     bandwidth: 384e3
-    gain: 40
     sample_rate: 384e3
     lo_offset: 100e3
     priority: 2
