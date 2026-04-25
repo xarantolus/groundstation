@@ -81,10 +81,21 @@ async def _read_stream(
             pass
         return
 
+    # GNU Radio writes status chars (O, U, L, D for overflow/underflow/late/
+    # dropped) to stderr without newlines. A pure newline-buffered reader
+    # would hide them until the next \n arrives — sometimes never. Flush any
+    # pending buffer if no new bytes arrive within this interval.
+    flush_after = 1.0
     buffer = bytearray()
     while True:
         try:
-            chunk = await stream.read(1024)
+            try:
+                chunk = await asyncio.wait_for(stream.read(1024), timeout=flush_after)
+            except asyncio.TimeoutError:
+                if buffer:
+                    callback(f"{prefix}{buffer.decode('utf-8', errors='replace')}")
+                    buffer.clear()
+                continue
             if not chunk:
                 break
             for byte in chunk:

@@ -306,7 +306,7 @@ async def _run(cfg: GroundstationConfig, no_tui: bool) -> None:
     scheduler = SchedulerService(cfg, bus, state, predictor, gate, passes_by_id)
     recorder = RecorderService(cfg, bus, state)
     decoder = DecoderService(cfg, bus, state, gate, passes_by_id)
-    transfer = TransferService(cfg, bus, state)
+    transfer = TransferService(cfg, bus, state, gate=gate)
     web_service = WebService(cfg, bus, view)
 
     # Push recovered passes into view so UIs have something to show immediately

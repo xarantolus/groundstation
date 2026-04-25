@@ -52,6 +52,11 @@ class SchedulerService:
         self._stop = asyncio.Event()
         self._next_pass_id: Optional[str] = None
 
+        # Seed the gate from any recovered passes so the boot-time decoder
+        # queue and transfer compression can't fire before the first _tick().
+        if passes:
+            self._update_gate_next_pass()
+
     async def run(self) -> None:
         sub = self._bus.subscribe(
             E.RecordingStarted,

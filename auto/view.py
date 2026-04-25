@@ -3,7 +3,6 @@ from __future__ import annotations
 import collections
 import datetime
 import logging
-import os
 import threading
 from typing import Deque, Dict, List, Optional, Set, Tuple
 
@@ -178,18 +177,12 @@ class ViewModel:
             )
         elif isinstance(event, E.TransferStarted):
             self.queued_transfers.pop(event.request_id, None)
-            total = 0
-            try:
-                if event.source_path:
-                    total = os.path.getsize(event.source_path)
-            except OSError:
-                pass
             self.active_transfers[event.request_id] = TransferView(
                 request_id=event.request_id,
                 source_path=event.source_path,
                 destination_path=event.destination_path,
                 label=event.label,
-                total=total,
+                total=0,
             )
         elif isinstance(event, E.TransferProgress):
             existing = self.active_transfers.get(event.request_id)

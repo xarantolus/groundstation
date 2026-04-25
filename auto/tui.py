@@ -124,7 +124,9 @@ class _TUIRenderable:
         if snap.active_transfers:
             for t in snap.active_transfers:
                 label = t.label or os.path.basename(t.source_path)
-                if t.total > 0:
+                if t.copied <= 0:
+                    lines.append(f"[yellow]⏸[/yellow] {label} [dim](preparing…)[/dim]")
+                elif t.total > 0:
                     pct = max(0.0, min(100.0, t.progress))
                     lines.append(
                         f"[cyan]↑[/cyan] {label} "
@@ -132,7 +134,10 @@ class _TUIRenderable:
                         f"[dim]({_format_bytes(t.copied)}/{_format_bytes(t.total)})[/dim]"
                     )
                 else:
-                    lines.append(f"[cyan]↑[/cyan] {label} [dim](starting…)[/dim]")
+                    lines.append(
+                        f"[cyan]↑[/cyan] {label} "
+                        f"[dim]({_format_bytes(t.copied)} copied)[/dim]"
+                    )
         elif not snap.queued_transfers:
             lines.append("[dim]no active transfers[/dim]")
 

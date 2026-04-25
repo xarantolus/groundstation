@@ -11,6 +11,7 @@ from typing import Callable, Deque, Dict, List, Optional
 
 from . import events as E
 from .bus import EventBus
+from .decode_gate import DecodeGate
 from .models import GroundstationConfig, IQ_DATA_FILE_EXTENSION, TransferRequest
 from .state import StateStore
 
@@ -46,11 +47,13 @@ class TransferService:
         cfg: GroundstationConfig,
         bus: EventBus,
         state: StateStore,
+        gate: Optional[DecodeGate] = None,
         num_workers: int = 4,
     ) -> None:
         self._cfg = cfg
         self._bus = bus
         self._state = state
+        self._gate = gate
         self._num_workers = num_workers
         self._queue: asyncio.Queue[TransferRequest] = asyncio.Queue()
         self._stop = asyncio.Event()
@@ -145,6 +148,8 @@ class TransferService:
         working_dest = req.destination_path
 
         if req.compress and working_source.endswith(IQ_DATA_FILE_EXTENSION) and not req.keep_source:
+            if self._gate is not None:
+                await self._gate.wait_open()
             try:
                 working_source = await compress_file(working_source)
                 if not working_dest.endswith(".zst"):
