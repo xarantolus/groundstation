@@ -31,7 +31,7 @@ async def test_gate_closed_until_predictor_ready():
 async def test_gate_opens_when_no_pass_no_recording():
     clock = FakeClock(datetime.datetime(2026, 1, 1, 10, 0, 0))
     g = DecodeGate(safety_minutes=15, clock=clock)
-    g.on_next_pass(None, None)
+    g.mark_ready()
     assert g.is_open()
     assert "no upcoming pass" in g.last_reason
 
@@ -40,7 +40,7 @@ async def test_gate_opens_when_no_pass_no_recording():
 async def test_gate_closes_during_recording():
     clock = FakeClock(datetime.datetime(2026, 1, 1, 10, 0, 0))
     g = DecodeGate(safety_minutes=15, clock=clock)
-    g.on_next_pass(None, None)
+    g.mark_ready()
     g.on_recording(True)
     assert not g.is_open()
     assert "recorder running" in g.last_reason
@@ -52,6 +52,7 @@ async def test_gate_closes_during_recording():
 async def test_gate_closed_within_safety_margin():
     clock = FakeClock(datetime.datetime(2026, 1, 1, 10, 0, 0))
     g = DecodeGate(safety_minutes=15, clock=clock)
+    g.mark_ready()
     start = clock.t + datetime.timedelta(minutes=10)
     end = start + datetime.timedelta(minutes=8)
     g.on_next_pass(start, end)
@@ -63,6 +64,7 @@ async def test_gate_closed_within_safety_margin():
 async def test_gate_open_outside_safety_margin():
     clock = FakeClock(datetime.datetime(2026, 1, 1, 10, 0, 0))
     g = DecodeGate(safety_minutes=15, clock=clock)
+    g.mark_ready()
     start = clock.t + datetime.timedelta(minutes=30)
     end = start + datetime.timedelta(minutes=8)
     g.on_next_pass(start, end)
@@ -74,6 +76,7 @@ async def test_gate_open_outside_safety_margin():
 async def test_gate_reopens_after_pass_ends():
     clock = FakeClock(datetime.datetime(2026, 1, 1, 10, 0, 0))
     g = DecodeGate(safety_minutes=15, clock=clock)
+    g.mark_ready()
     # Inside the safety window, gate closed
     start = clock.t + datetime.timedelta(minutes=5)
     end = start + datetime.timedelta(minutes=8)
@@ -88,6 +91,7 @@ async def test_gate_reopens_after_pass_ends():
 async def test_gate_replaces_timer_when_closer_pass_arrives():
     clock = FakeClock(datetime.datetime(2026, 1, 1, 10, 0, 0))
     g = DecodeGate(safety_minutes=15, clock=clock)
+    g.mark_ready()
     g.on_next_pass(clock.t + datetime.timedelta(hours=2), clock.t + datetime.timedelta(hours=2, minutes=8))
     assert g.is_open()
     first_timer = g._timer
@@ -103,7 +107,7 @@ async def test_gate_replaces_timer_when_closer_pass_arrives():
 async def test_wait_open_unblocks():
     clock = FakeClock(datetime.datetime(2026, 1, 1, 10, 0, 0))
     g = DecodeGate(safety_minutes=15, clock=clock)
-    g.on_next_pass(None, None)
+    g.mark_ready()
     g.on_recording(True)
 
     async def waiter():
@@ -129,7 +133,7 @@ async def test_on_change_callback_fires_on_state_change():
     )
     # initial state is closed until the first prediction lands
     assert events[-1] == (False, "awaiting first pass prediction")
-    g.on_next_pass(None, None)
+    g.mark_ready()
     assert events[-1] == (True, "no upcoming pass")
     g.on_recording(True)
     assert events[-1] == (False, "recorder running")
@@ -148,7 +152,7 @@ async def test_gate_fails_open_on_exception():
             raise RuntimeError("boom")
 
     g = DecodeGate(safety_minutes=15, clock=clock)
-    g.on_next_pass(None, None)
+    g.mark_ready()
     # Force an exception path by injecting a bad "next_start"
     g._next_start = Boom()  # type: ignore
     g._reevaluate()

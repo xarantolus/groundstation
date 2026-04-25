@@ -87,6 +87,14 @@ class DecodeGate:
     ) -> None:
         self._next_start = start_time
         self._next_end = end_time
+        self._reevaluate()
+
+    def mark_ready(self) -> None:
+        """Called after the scheduler has finished its first prediction tick.
+        Until then the gate stays closed so decoders/compressors don't sneak
+        past based on stale or missing pass info at boot."""
+        if self._predictor_ready:
+            return
         self._predictor_ready = True
         self._reevaluate()
 

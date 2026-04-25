@@ -71,10 +71,17 @@ class SchedulerService:
         )
         try:
             while not self._stop.is_set():
+                tick_failed = False
                 try:
                     await self._tick()
                 except Exception:
+                    tick_failed = True
                     logger.exception("scheduler tick failed")
+                # Even on tick failure, mark the gate ready — leaving it
+                # closed forever on a transient prediction error would
+                # strand the decoder/compressor queues. The gate's other
+                # checks (recording, upcoming pass) still apply.
+                self._gate.mark_ready()
                 try:
                     await asyncio.wait_for(
                         self._stop.wait(),
