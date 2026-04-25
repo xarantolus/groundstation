@@ -93,7 +93,7 @@ def test_decode_queue_put_and_tombstone(tmp_path: Path):
     s.decode_put("p1", 1)
     s.decode_put("p2", 0)
     s.decode_tombstone("p1", 0)
-    assert set(s.load_decode_queue()) == {("p1", 1), ("p2", 0)}
+    assert set(s.load_decode_queue()) == {("p1", 1, 0), ("p2", 0, 0)}
 
 
 def test_atomic_write_no_partial_file(tmp_path: Path, monkeypatch):

@@ -138,7 +138,7 @@ def _boot_recovery(
     passes_by_id: Dict[str, Pass] = {}
     extra_transfers: List[TransferRequest] = []
 
-    persisted_decode_keys = set(state.load_decode_queue())
+    persisted_decode_keys = {(pid, idx) for (pid, idx, _) in state.load_decode_queue()}
     persisted_transfer_sources = {
         req.source_path for req in state.load_transfer_queue()
     }

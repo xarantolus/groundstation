@@ -30,6 +30,8 @@ def _cgroup_memory_available() -> bool:
 
 
 def _memory_limit_mb() -> Optional[int]:
+    if platform.system() != "Linux":
+        return None
     if not _cgroup_memory_available():
         logger.warning(
             "cgroup memory controller unavailable — skipping --memory limit; "
@@ -181,15 +183,24 @@ async def run_recorder(
     return out_file
 
 
+DECODER_KILLED_BY_STOP = -2
+
+
 async def run_decoder(
     sat: Satellite,
     decoder: Decoder,
     pass_dir: str,
     output_dir: str,
     log_callback: Optional[Callable[[str], None]] = None,
-    timeout_minutes: float | None = DEFAULT_DECODER_TIMEOUT_MINUTES,
+    timeout_minutes: float | None = None,
+    stop_event: Optional[asyncio.Event] = None,
 ) -> int:
-    dec_timeout = decoder.timeout_minutes if decoder.timeout_minutes is not None else timeout_minutes
+    if timeout_minutes is not None:
+        dec_timeout = timeout_minutes
+    elif decoder.timeout_minutes is not None:
+        dec_timeout = decoder.timeout_minutes
+    else:
+        dec_timeout = DEFAULT_DECODER_TIMEOUT_MINUTES
     if dec_timeout is not None and dec_timeout <= 0:
         dec_timeout = None
 
@@ -235,18 +246,38 @@ async def run_decoder(
         _read_stream(process.stderr, log_callback, "ERR: "),
         process.wait(),
     )
+    killed_by_stop = False
+    main_task = asyncio.ensure_future(gathered)
+    waiters: List[asyncio.Future] = [main_task]
+    stop_task: Optional[asyncio.Task] = None
+    if stop_event is not None:
+        stop_task = asyncio.create_task(stop_event.wait())
+        waiters.append(stop_task)
+
     try:
-        if dec_timeout is None:
-            await gathered
-        else:
-            await asyncio.wait_for(gathered, timeout=dec_timeout * 60)
-    except asyncio.TimeoutError:
-        logger.warning("decoder exceeded %s min — terminating", dec_timeout)
-        await _terminate(process)
+        timeout = dec_timeout * 60 if dec_timeout is not None else None
+        done, _ = await asyncio.wait(
+            waiters, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
+        )
+        if not done:
+            logger.warning("decoder exceeded %s min — terminating", dec_timeout)
+            await _terminate(process)
+            await asyncio.gather(main_task, return_exceptions=True)
+        elif stop_task is not None and stop_task in done:
+            logger.info("decoder stop signalled — terminating")
+            killed_by_stop = True
+            await _terminate(process)
+            await asyncio.gather(main_task, return_exceptions=True)
     except asyncio.CancelledError:
         await _terminate(process)
+        await asyncio.gather(main_task, return_exceptions=True)
         raise
+    finally:
+        if stop_task is not None and not stop_task.done():
+            stop_task.cancel()
 
+    if killed_by_stop:
+        return DECODER_KILLED_BY_STOP
     return process.returncode if process.returncode is not None else -1
 
 

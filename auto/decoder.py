@@ -1,21 +1,25 @@
 from __future__ import annotations
 
 import asyncio
+import collections
 import logging
 import os
 import uuid
-from typing import Dict, List, Set, Tuple
+from typing import Deque, Dict, List, Optional, Set, Tuple
 
 from . import events as E
 from .bus import EventBus, run_subscriber
 from .decode_gate import DecodeGate
 from .models import GroundstationConfig, IQ_DATA_FILE_EXTENSION, Pass, PassStatus, TransferRequest
-from .podman import filter_decoder_outputs, run_decoder
+from .podman import DECODER_KILLED_BY_STOP, DEFAULT_DECODER_TIMEOUT_MINUTES, filter_decoder_outputs, run_decoder
 from .state import StateStore
 from .transfer import compress_file
 
 logger = logging.getLogger("groundstation.decoder")
 _decoder_output_logger = logging.getLogger("groundstation.decoders.output")
+
+MAX_DECODE_ATTEMPTS = 3
+DECODE_RETRY_TIMEOUT_FACTOR = 0.3
 
 
 class DecoderService:
@@ -40,29 +44,46 @@ class DecoderService:
         self._state = state
         self._gate = gate
         self._passes = passes
-        self._queue: asyncio.Queue[Tuple[str, int]] = asyncio.Queue()
+        self._queue: Deque[Tuple[str, int, int]] = collections.deque()
         self._in_queue: Set[Tuple[str, int]] = set()
+        self._wakeup = asyncio.Event()
         self._stop = asyncio.Event()
         self._cleanup_tasks: Set[asyncio.Task] = set()
         self._cleanup_launched: Set[str] = set()
 
-        for key in state.load_decode_queue():
-            self._enqueue_persisted(key)
+        # Active decoder tracking — set in _run_one; the RecordingStarted
+        # handler signals _active_kill_event to terminate the decoder mid-run
+        # so the recorder doesn't fight CPU/IO with it.
+        self._active_key: Optional[Tuple[str, int, int]] = None
+        self._active_kill_event: Optional[asyncio.Event] = None
+
+        for item in state.load_decode_queue():
+            self._enqueue_persisted(item)
         if self._in_queue:
             logger.info(
                 "decoder: restored %d pending decode(s) from state", len(self._in_queue)
             )
 
-    def _enqueue_persisted(self, key: Tuple[str, int]) -> None:
+    def _enqueue_persisted(self, item: Tuple[str, int, int]) -> None:
+        key = (item[0], item[1])
         if key in self._in_queue:
             return
         self._in_queue.add(key)
-        self._queue.put_nowait(key)
+        self._queue.append(item)
+        self._wakeup.set()
+
+    def _enqueue(self, item: Tuple[str, int, int], front: bool = False) -> None:
+        key = (item[0], item[1])
+        if key in self._in_queue:
+            return
+        self._in_queue.add(key)
+        if front:
+            self._queue.appendleft(item)
+        else:
+            self._queue.append(item)
+        self._wakeup.set()
 
     async def run(self) -> None:
-        # Announce any items we restored from state at __init__ time so the
-        # UI's pending-count is correct. This must happen after subscribers
-        # (view, web) are running — main.py starts them before services.
         for pass_id, idx in list(self._in_queue):
             await self._bus.publish(
                 E.DecodeQueued(pass_id=pass_id, decoder_index=idx)
@@ -70,6 +91,7 @@ class DecoderService:
 
         sub = self._bus.subscribe(
             E.RecordingCompleted,
+            E.RecordingStarted,
             name="decoder.events",
             queue_size=128,
         )
@@ -78,30 +100,42 @@ class DecoderService:
         )
         try:
             while not self._stop.is_set():
-                try:
-                    key = await self._queue.get()
-                except asyncio.CancelledError:
-                    raise
-                self._in_queue.discard(key)
-                if self._stop.is_set() or key[0] == "__stop__":
-                    break
-                # Wait for the gate, but wake up on shutdown so we don't
-                # block indefinitely when the gate happens to be closed.
+                if not self._queue:
+                    self._wakeup.clear()
+                    if self._queue:
+                        continue
+                    wakeup_task = asyncio.create_task(self._wakeup.wait())
+                    stop_task = asyncio.create_task(self._stop.wait())
+                    done, pending = await asyncio.wait(
+                        {wakeup_task, stop_task}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    for t in pending:
+                        t.cancel()
+                    if self._stop.is_set():
+                        break
+                    continue
+
+                item = self._queue.popleft()
+                self._in_queue.discard((item[0], item[1]))
+
                 gate_task = asyncio.create_task(self._gate.wait_open())
                 stop_task = asyncio.create_task(self._stop.wait())
-                done, pending = await asyncio.wait(
+                await asyncio.wait(
                     {gate_task, stop_task}, return_when=asyncio.FIRST_COMPLETED
                 )
-                for t in pending:
-                    t.cancel()
+                if not gate_task.done():
+                    gate_task.cancel()
+                if not stop_task.done():
+                    stop_task.cancel()
                 if self._stop.is_set():
                     break
+
                 try:
-                    await self._run_one(*key)
+                    await self._run_one(*item)
                 except asyncio.CancelledError:
                     raise
                 except Exception:
-                    logger.exception("decoder run failed: %s", key)
+                    logger.exception("decoder run failed: %s", item)
         finally:
             sub.close()
             sub_task.cancel()
@@ -119,12 +153,7 @@ class DecoderService:
 
     def stop(self) -> None:
         self._stop.set()
-        # Push a sentinel so the queue wait unblocks. We don't actually use
-        # the value — the stop check above handles it.
-        try:
-            self._queue.put_nowait(("__stop__", -1))
-        except asyncio.QueueFull:
-            pass
+        self._wakeup.set()
 
     async def _on_event(self, event: E.Event) -> None:
         if isinstance(event, E.RecordingCompleted):
@@ -137,16 +166,17 @@ class DecoderService:
             p.status = PassStatus.RECORDED
             self._state.save_pass(p)
             for idx in pending:
-                key = (p.id, idx)
-                self._state.decode_put(p.id, idx)
-                if key not in self._in_queue:
-                    self._in_queue.add(key)
-                    await self._queue.put(key)
+                self._state.decode_put(p.id, idx, attempt=0)
+                self._enqueue((p.id, idx, 0))
                 await self._bus.publish(E.DecodeQueued(pass_id=p.id, decoder_index=idx))
+        elif isinstance(event, E.RecordingStarted):
+            if self._active_kill_event is not None and not self._active_kill_event.is_set():
+                logger.info(
+                    "recording starting — killing active decoder %s", self._active_key
+                )
+                self._active_kill_event.set()
 
-    async def _run_one(self, pass_id: str, decoder_index: int) -> None:
-        if pass_id == "__stop__":
-            return
+    async def _run_one(self, pass_id: str, decoder_index: int, attempt: int) -> None:
         p = self._passes.get(pass_id)
         if not p:
             logger.warning("decoder: pass %s unknown — dropping index %d", pass_id, decoder_index)
@@ -158,9 +188,6 @@ class DecoderService:
             return
 
         decoder = p.satellite.decoder[decoder_index]
-        # Unnamed decoders write directly into pass_dir; named ones get their
-        # own subdirectory. filter_decoder_outputs ignores the pass-level
-        # recording/info files and sibling decoder subdirs.
         decoder_name = decoder.name or f"decoder_{decoder_index}"
         output_dir = p.pass_dir if not decoder.name else os.path.join(p.pass_dir, decoder_name)
 
@@ -192,12 +219,30 @@ class DecoderService:
                 )
             )
 
+        base_timeout = (
+            decoder.timeout_minutes
+            if decoder.timeout_minutes is not None
+            else DEFAULT_DECODER_TIMEOUT_MINUTES
+        )
+        effective_timeout = base_timeout
+        if base_timeout is not None and attempt > 0:
+            effective_timeout = base_timeout * (DECODE_RETRY_TIMEOUT_FACTOR ** attempt)
+
         await self._bus.publish(
             E.DecodeStarted(
                 pass_id=pass_id, decoder_index=decoder_index, decoder_name=decoder_name
             )
         )
 
+        before = _snapshot_dir(output_dir)
+        is_shared_dir = output_dir == p.pass_dir
+
+        kill_event = asyncio.Event()
+        self._active_key = (pass_id, decoder_index, attempt)
+        self._active_kill_event = kill_event
+
+        rc: int = -1
+        crash_error: Optional[str] = None
         try:
             rc = await run_decoder(
                 p.satellite,
@@ -205,16 +250,63 @@ class DecoderService:
                 p.pass_dir,
                 output_dir,
                 log_callback=on_log,
+                timeout_minutes=effective_timeout,
+                stop_event=kill_event,
             )
         except asyncio.CancelledError:
+            self._active_key = None
+            self._active_kill_event = None
+            _cleanup_new(output_dir, before, protect_shared=is_shared_dir)
             raise
         except Exception as e:
+            crash_error = str(e)
+        finally:
+            self._active_key = None
+            self._active_kill_event = None
+
+        if rc == DECODER_KILLED_BY_STOP:
+            _cleanup_new(output_dir, before, protect_shared=is_shared_dir)
+            logger.info(
+                "decoder %s/%s killed by recorder — re-queued at front (attempt %d unchanged)",
+                pass_id,
+                decoder_name,
+                attempt,
+            )
+            self._enqueue((pass_id, decoder_index, attempt), front=True)
+            return
+
+        if crash_error is not None or rc != 0:
+            _cleanup_new(output_dir, before, protect_shared=is_shared_dir)
+            error_text = crash_error or f"decoder exited {rc}"
+            next_attempt = attempt + 1
+            if next_attempt < MAX_DECODE_ATTEMPTS:
+                logger.warning(
+                    "decoder %s/%s failed (%s) — retry %d/%d",
+                    pass_id,
+                    decoder_name,
+                    error_text,
+                    next_attempt,
+                    MAX_DECODE_ATTEMPTS - 1,
+                )
+                self._state.decode_put(pass_id, decoder_index, attempt=next_attempt)
+                self._enqueue((pass_id, decoder_index, next_attempt))
+                await self._bus.publish(
+                    E.DecodeFailed(
+                        pass_id=pass_id, decoder_index=decoder_index, error=error_text
+                    )
+                )
+                return
             p.decoders_failed.append(decoder_index)
             self._state.save_pass(p)
             self._state.decode_tombstone(pass_id, decoder_index)
             await self._bus.publish(
-                E.DecodeFailed(pass_id=pass_id, decoder_index=decoder_index, error=str(e))
+                E.DecodeFailed(pass_id=pass_id, decoder_index=decoder_index, error=error_text)
             )
+            if self._all_decoders_settled(p) and p.id not in self._cleanup_launched:
+                self._cleanup_launched.add(p.id)
+                task = asyncio.create_task(self._after_all_decoders(p))
+                self._cleanup_tasks.add(task)
+                task.add_done_callback(self._cleanup_tasks.discard)
             return
 
         surviving = filter_decoder_outputs(output_dir, decoder, pass_dir=p.pass_dir)
@@ -226,11 +318,7 @@ class DecoderService:
                 E.DecodeFailed(
                     pass_id=pass_id,
                     decoder_index=decoder_index,
-                    error=(
-                        f"decoder exited {rc} and produced no usable output"
-                        if rc != 0
-                        else "decoder output below min_files/min_size_bytes"
-                    ),
+                    error="decoder output below min_files/min_size_bytes",
                 )
             )
         else:
@@ -341,3 +429,37 @@ class DecoderService:
             f"{p.satellite.name}_{p.pass_info.start_time.strftime('%Y-%m-%d_%H-%M-%S')}",
         )
         return os.path.join(prefix, *parts)
+
+
+def _snapshot_dir(path: str) -> Set[str]:
+    snap: Set[str] = set()
+    if not os.path.isdir(path):
+        return snap
+    for root, dirs, files in os.walk(path):
+        for f in files:
+            snap.add(os.path.join(root, f))
+        for d in dirs:
+            snap.add(os.path.join(root, d))
+    return snap
+
+
+def _cleanup_new(path: str, before: Set[str], protect_shared: bool) -> None:
+    """Remove anything created under `path` that wasn't there at snapshot time.
+    `protect_shared=True` is set when output_dir == pass_dir; the recording/info
+    files at that level are then explicitly preserved even if they somehow
+    weren't snapshotted."""
+    if not os.path.isdir(path):
+        return
+    after = _snapshot_dir(path)
+    new = after - before
+    if protect_shared:
+        protected = {os.path.join(path, n) for n in ("recording.bin", "recording.bin.zst", "info.json")}
+        new -= protected
+    for p in sorted(new, key=lambda x: -x.count(os.sep)):
+        try:
+            if os.path.isfile(p):
+                os.remove(p)
+            elif os.path.isdir(p):
+                os.rmdir(p)
+        except OSError:
+            pass

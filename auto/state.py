@@ -170,10 +170,15 @@ class StateStore:
 
     # ---------- Decode queue ----------
 
-    def decode_put(self, pass_id: str, decoder_index: int) -> None:
+    def decode_put(self, pass_id: str, decoder_index: int, attempt: int = 0) -> None:
         self._append_log(
             self.pending_decodes_log,
-            {"op": "put", "pass_id": pass_id, "decoder_index": decoder_index},
+            {
+                "op": "put",
+                "pass_id": pass_id,
+                "decoder_index": decoder_index,
+                "attempt": attempt,
+            },
         )
 
     def decode_tombstone(self, pass_id: str, decoder_index: int) -> None:
@@ -182,25 +187,25 @@ class StateStore:
             {"op": "done", "pass_id": pass_id, "decoder_index": decoder_index},
         )
 
-    def load_decode_queue(self) -> List[tuple[str, int]]:
+    def load_decode_queue(self) -> List[tuple[str, int, int]]:
         entries = self._read_jsonl(self.pending_decodes_log)
-        pending: Dict[tuple[str, int], bool] = {}
+        pending: Dict[tuple[str, int], int] = {}
         for e in entries:
             try:
                 key = (e["pass_id"], int(e["decoder_index"]))
             except (KeyError, ValueError, TypeError):
                 continue
             if e.get("op") == "put":
-                pending[key] = True
+                pending[key] = int(e.get("attempt", 0))
             elif e.get("op") == "done":
                 pending.pop(key, None)
-        pending_keys = list(pending.keys())
+        pending_items = [(pid, idx, att) for (pid, idx), att in pending.items()]
         logger.info(
             "state: loaded %d pending decode(s) from %s",
-            len(pending_keys),
+            len(pending_items),
             self.pending_decodes_log.name,
         )
-        return pending_keys
+        return pending_items
 
     # ---------- Transfer completed history ----------
 
@@ -236,8 +241,8 @@ class StateStore:
         before = _count_lines(self.pending_decodes_log)
         open_keys = self.load_decode_queue()
         entries = [
-            {"op": "put", "pass_id": pid, "decoder_index": idx}
-            for (pid, idx) in open_keys
+            {"op": "put", "pass_id": pid, "decoder_index": idx, "attempt": att}
+            for (pid, idx, att) in open_keys
         ]
         if len(entries) >= before:
             return 0
