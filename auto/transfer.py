@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import errno
 import logging
 import os
 import time
@@ -16,6 +17,20 @@ from .state import StateStore
 logger = logging.getLogger("groundstation.transfer")
 
 MAX_ATTEMPTS = 3
+
+# Disk-full retries are handled separately from MAX_ATTEMPTS: the condition
+# clears on its own once another upload completes and frees space, so we wait
+# longer and don't burn through the regular attempt budget.
+DISK_FULL_BACKOFF_INITIAL = 60
+DISK_FULL_BACKOFF_MAX = 600
+MAX_DISK_RETRIES = 60
+
+
+def _is_disk_full(error: BaseException) -> bool:
+    if isinstance(error, OSError) and error.errno == errno.ENOSPC:
+        return True
+    msg = str(error).lower()
+    return "no space left on device" in msg or "enospc" in msg
 
 
 class TransferService:
@@ -135,6 +150,14 @@ class TransferService:
                 if not working_dest.endswith(".zst"):
                     working_dest = working_dest + ".zst"
             except Exception as e:
+                if _is_disk_full(e):
+                    # Disk full: re-queue with long backoff. Falling through to
+                    # raw upload would consume far more bandwidth and NAS space
+                    # than waiting for an in-flight upload to free local space.
+                    await self._handle_failure(
+                        req, original_source, original_source, req.destination_path, e
+                    )
+                    return
                 logger.error("compression failed for %s: %s — uploading raw", original_source, e)
 
         async def report(copied: int, total: int) -> None:
@@ -223,9 +246,53 @@ class TransferService:
         working_dest: str,
         error: Exception,
     ) -> None:
-        attempt = req.attempt + 1
         compressed = working_source != original_source and os.path.exists(working_source)
 
+        if _is_disk_full(error):
+            disk_retries = req.disk_retry_count + 1
+            if disk_retries <= MAX_DISK_RETRIES:
+                wait = min(
+                    DISK_FULL_BACKOFF_INITIAL * (2 ** (disk_retries - 1)),
+                    DISK_FULL_BACKOFF_MAX,
+                )
+                logger.warning(
+                    "transfer hit disk-full (%s). retry %d/%d in %ds",
+                    error,
+                    disk_retries,
+                    MAX_DISK_RETRIES,
+                    wait,
+                )
+                await self._bus.publish(
+                    E.TransferFailed(
+                        request_id=req.id,
+                        source_path=original_source,
+                        error=str(error),
+                        will_retry=True,
+                    )
+                )
+                await asyncio.sleep(wait)
+                retry = TransferRequest(
+                    id=str(uuid.uuid4()),
+                    source_path=working_source if compressed else original_source,
+                    destination_path=working_dest if compressed else req.destination_path,
+                    keep_source=req.keep_source,
+                    compress=False if compressed else req.compress,
+                    attempt=req.attempt,
+                    disk_retry_count=disk_retries,
+                    pass_id=req.pass_id,
+                    label=req.label,
+                )
+                self._state.transfer_put(retry)
+                self._state.transfer_tombstone(req.id)
+                await self._bus.publish(E.TransferQueued(request=retry))
+                return
+            logger.error(
+                "transfer failed permanently after %d disk-full retries: %s",
+                MAX_DISK_RETRIES,
+                original_source,
+            )
+
+        attempt = req.attempt + 1
         if attempt < MAX_ATTEMPTS:
             wait = 10 * attempt
             logger.warning(
@@ -255,6 +322,7 @@ class TransferService:
                 keep_source=req.keep_source,
                 compress=False if compressed else req.compress,
                 attempt=attempt,
+                disk_retry_count=req.disk_retry_count,
                 pass_id=req.pass_id,
                 label=req.label,
             )
@@ -357,6 +425,10 @@ async def compress_file(source_path: str) -> str:
     )
     _, err = await proc.communicate()
     if proc.returncode != 0:
+        try:
+            os.remove(compressed)
+        except OSError:
+            pass
         raise RuntimeError(
             f"zstd failed with code {proc.returncode}: {err.decode(errors='replace')}"
         )

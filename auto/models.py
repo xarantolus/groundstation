@@ -123,6 +123,7 @@ class TransferRequest(BaseModel):
     keep_source: bool = False
     compress: bool = True
     attempt: int = 0
+    disk_retry_count: int = 0
     pass_id: str | None = None
     label: str | None = None
     created_at: datetime.datetime = Field(default_factory=datetime.datetime.now)
