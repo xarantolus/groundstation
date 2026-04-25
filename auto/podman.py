@@ -132,6 +132,91 @@ async def _podman_kill(container_name: str) -> None:
         logger.exception("podman kill %s failed", container_name)
 
 
+async def _container_exists(name: str) -> bool:
+    """True if podman knows about a container with this name (any state).
+    Returns True on internal errors so a transient `podman` failure can't
+    cause the watchdog to falsely shoot down a healthy decoder."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "podman", "container", "exists", name,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        try:
+            rc = await asyncio.wait_for(proc.wait(), timeout=10)
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+                await proc.wait()
+            except ProcessLookupError:
+                pass
+            return True
+        return rc == 0
+    except Exception:
+        logger.exception("podman container exists check failed for %s", name)
+        return True
+
+
+CONTAINER_WATCHDOG_STARTUP_S = 60.0
+CONTAINER_WATCHDOG_POLL_S = 5.0
+CONTAINER_WATCHDOG_GRACE_S = 15.0
+
+
+async def _container_watchdog(
+    container_name: str,
+    process: asyncio.subprocess.Process,
+) -> None:
+    """Detect ``podman run`` hanging after the container has already exited.
+
+    Symptom seen in the field: the container is gone (verified externally)
+    but the `podman run` parent is still alive, so `process.wait()` never
+    returns and the decoder appears stuck running until the full decoder
+    timeout fires. This is a known podman/conmon race around `--rm` cleanup.
+
+    This watchdog waits until the container becomes visible to podman, then
+    polls until it disappears. Once gone, it gives the parent a grace window
+    to unwind on its own (normal `--rm` cleanup is fast); if the parent is
+    still alive after that, it gets SIGKILL so `process.wait()` returns and
+    the run is marked failed via the standard retry path.
+    """
+    loop = asyncio.get_running_loop()
+
+    startup_deadline = loop.time() + CONTAINER_WATCHDOG_STARTUP_S
+    while True:
+        if process.returncode is not None:
+            return
+        if await _container_exists(container_name):
+            break
+        if loop.time() >= startup_deadline:
+            return
+        await asyncio.sleep(1)
+
+    while True:
+        if process.returncode is not None:
+            return
+        if not await _container_exists(container_name):
+            break
+        try:
+            await asyncio.wait_for(process.wait(), timeout=CONTAINER_WATCHDOG_POLL_S)
+            return
+        except asyncio.TimeoutError:
+            pass
+
+    try:
+        await asyncio.wait_for(process.wait(), timeout=CONTAINER_WATCHDOG_GRACE_S)
+        return
+    except asyncio.TimeoutError:
+        logger.warning(
+            "container %s is gone but `podman run` still alive after %.0fs — SIGKILL'ing parent",
+            container_name,
+            CONTAINER_WATCHDOG_GRACE_S,
+        )
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+
+
 async def _terminate(process: asyncio.subprocess.Process, container_name: Optional[str] = None) -> None:
     if container_name:
         await _podman_kill(container_name)
@@ -261,6 +346,10 @@ async def run_decoder(
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
 
+    watchdog_task = asyncio.create_task(
+        _container_watchdog(container_name, process), name=f"watchdog-{container_name}"
+    )
+
     gathered = asyncio.gather(
         _read_stream(process.stdout, log_callback),
         _read_stream(process.stderr, log_callback, "ERR: "),
@@ -293,6 +382,11 @@ async def run_decoder(
         await asyncio.gather(main_task, return_exceptions=True)
         raise
     finally:
+        watchdog_task.cancel()
+        try:
+            await watchdog_task
+        except (asyncio.CancelledError, Exception):
+            pass
         if stop_task is not None and not stop_task.done():
             stop_task.cancel()
 
