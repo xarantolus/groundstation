@@ -11,9 +11,6 @@ COPY waterfall.py waterfall.sh ./
 RUN chmod +x waterfall.sh
 
 ENV PATH="/app/.venv/bin:$PATH"
-ENV MPLCONFIGDIR=/opt/mpl
-RUN mkdir -p /opt/mpl && \
-    python -c "import matplotlib; matplotlib.use('Agg'); \
-import matplotlib.pyplot as plt; f=plt.figure(); plt.plot([0,1],[0,1]); plt.close(f)"
+ENV MPLCONFIGDIR=/tmp/mpl
 
 ENTRYPOINT ["/app/waterfall.sh"]

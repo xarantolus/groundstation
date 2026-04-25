@@ -1,8 +1,8 @@
 #!/bin/bash
 set -eoux pipefail
 
-# Run satdump with a specific pipeline
-# https://docs.satdump.org/pipelines.html
+mkdir -p /tmp/satdump-config
+export HOME=/tmp/satdump-config
 
 satdump \
 	"${PIPELINE_NAME}" \

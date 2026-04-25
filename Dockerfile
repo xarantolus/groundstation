@@ -114,6 +114,8 @@ RUN --mount=type=cache,target=/tmp/gr-satellites \
 RUN --mount=type=cache,target=/root/.cache/pip \
 	pip3 install matplotlib numpy scipy
 
+ENV MPLCONFIGDIR=/tmp/mpl
+
 # Ensures that the osmosdr .so files are found
 ENV LD_LIBRARY_PATH=/usr/local/lib:/usr/local/lib64
 

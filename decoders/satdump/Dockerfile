@@ -30,9 +30,7 @@ RUN --mount=type=cache,target=/var/cache/apt \
     apt -y upgrade && \
     xargs -a packages.builder apt install --no-install-recommends -qy
 
-# Cache cmake build files
-RUN --mount=type=cache,target=/usr/local/src/satdump/build \
-    cmake -B build \
+RUN cmake -B build \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_CXX_FLAGS="-Wno-error -Wno-unused-parameter" \
     -Wno-dev \
