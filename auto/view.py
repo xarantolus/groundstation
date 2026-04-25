@@ -89,6 +89,8 @@ class ViewSnapshot(BaseModel):
     passes: List[Pass] = Field(default_factory=list)
     recording: str | None = None
     decoding: DecodingNow | None = None
+    last_decoding: DecodingNow | None = None
+    decoding_ended_at: datetime.datetime | None = None
     pending_decoders: int = 0
     active_transfers: List[TransferView] = Field(default_factory=list)
     queued_transfers: List[QueuedTransferView] = Field(default_factory=list)
@@ -110,6 +112,8 @@ class ViewModel:
         self.passes: List[Pass] = []
         self.recording_pass_id: Optional[str] = None
         self.decoding: Optional[DecodingNow] = None
+        self.last_decoding: Optional[DecodingNow] = None
+        self.decoding_ended_at: Optional[datetime.datetime] = None
         self.decoders_pending: Set[Tuple[str, int]] = set()
         self.active_transfers: Dict[str, TransferView] = {}
         self.queued_transfers: Dict[str, QueuedTransferView] = {}
@@ -133,6 +137,11 @@ class ViewModel:
         elif isinstance(event, (E.PassPredicted, E.PassUpcoming, E.PassStarted, E.PassEnded)):
             self._upsert_pass(event.pass_)
         elif isinstance(event, E.RecordingStarted):
+            # Recording start triggers a kill of any active decoder. Mark it as
+            # ended now (rather than waiting for cleanup-induced DecodeFailed,
+            # which is delayed by however long the container takes to die).
+            if self.decoding is not None:
+                self._mark_decoding_ended()
             self.recording_pass_id = event.pass_id
             self._update_pass_status(event.pass_id, PassStatus.RECORDING)
         elif isinstance(event, E.RecordingCompleted):
@@ -152,11 +161,13 @@ class ViewModel:
                 decoder_index=event.decoder_index,
                 decoder_name=event.decoder_name,
             )
+            self.last_decoding = self.decoding.model_copy()
+            self.decoding_ended_at = None
             self._update_pass_status(event.pass_id, PassStatus.DECODING)
         elif isinstance(event, (E.DecodeCompleted, E.DecodeFailed)):
             self.decoders_pending.discard((event.pass_id, event.decoder_index))
             if self.decoding and self.decoding.pass_id == event.pass_id and self.decoding.decoder_index == event.decoder_index:
-                self.decoding = None
+                self._mark_decoding_ended()
         elif isinstance(event, E.DecodeLog):
             self.decoder_log.append(
                 DecoderLogLine(
@@ -239,6 +250,8 @@ class ViewModel:
                 passes=[p.model_copy(deep=True) for p in self.passes],
                 recording=self.recording_pass_id,
                 decoding=self.decoding.model_copy() if self.decoding else None,
+                last_decoding=self.last_decoding.model_copy() if self.last_decoding else None,
+                decoding_ended_at=self.decoding_ended_at,
                 pending_decoders=len(self.decoders_pending),
                 active_transfers=[t.model_copy() for t in self.active_transfers.values()],
                 queued_transfers=[t.model_copy() for t in self.queued_transfers.values()],
@@ -247,6 +260,10 @@ class ViewModel:
                 decoder_log=list(self.decoder_log),
                 gate=self.gate.model_copy(),
             )
+
+    def _mark_decoding_ended(self) -> None:
+        self.decoding = None
+        self.decoding_ended_at = datetime.datetime.now()
 
     def _upsert_pass(self, p: Pass) -> None:
         for i, existing in enumerate(self.passes):

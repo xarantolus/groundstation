@@ -20,6 +20,8 @@ from .view import ViewModel
 
 logger = logging.getLogger("groundstation.tui")
 
+DECODER_PANEL_GRACE_SECONDS = 5.0
+
 
 class TUIService:
     def __init__(self, bus: EventBus, view: ViewModel, refresh_per_second: int = 4) -> None:
@@ -68,7 +70,7 @@ class _TUIRenderable:
         if show_pending:
             self._layout["pending_decoders"].update(self._pending_decoders_line(snap))
         self._layout["main_log"].update(self._log_panel(snap))
-        if snap.decoding:
+        if _show_decoder_panel(snap):
             self._layout["decoder_log"].visible = True
             self._layout["decoder_log"].update(self._decoder_log_panel(snap))
         else:
@@ -177,10 +179,12 @@ class _TUIRenderable:
             for l in snap.decoder_log[-200:]
         ]
         suffix = f" · {snap.pending_decoders} waiting" if snap.pending_decoders else ""
-        if snap.decoding:
+        active = snap.decoding or snap.last_decoding
+        if active:
+            finished_marker = " (finished)" if snap.decoding is None else ""
             title = (
-                f"Decoder log — {snap.decoding.decoder_name or 'decoder'} "
-                f"({snap.decoding.pass_id}){suffix}"
+                f"Decoder log — {active.decoder_name or 'decoder'} "
+                f"({active.pass_id}){finished_marker}{suffix}"
             )
         else:
             title = f"Decoder log{suffix}"
@@ -226,6 +230,15 @@ class _TailRenderable:
                 segments.append(Segment.line())
             segments.extend(row)
         yield Segments(segments)
+
+
+def _show_decoder_panel(snap) -> bool:
+    if snap.decoding is not None:
+        return True
+    if snap.decoding_ended_at is None:
+        return False
+    delta = (datetime.datetime.now() - snap.decoding_ended_at).total_seconds()
+    return delta < DECODER_PANEL_GRACE_SECONDS
 
 
 def _level_style(level: str) -> str:
