@@ -304,7 +304,7 @@ blocks:
     alias: ''
     append: 'False'
     comment: KISS frames preserve per-packet boundaries
-    file: /output/csp_packets_kiss.bin
+    file: /output/csp_packets.kiss
     options: '""'
   states:
     bus_sink: false
