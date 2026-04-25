@@ -108,20 +108,6 @@ if [ "$PUSH_MODE" = true ]; then
 fi
 cd ..
 
-# Build NOAA decoder
-cd noaa_apt
-BUILD_ARGS="--pull=never --platform $PLATFORM -t $IMAGE_PATH_PREFIX/noaa-decoder:$IMAGE_TAG --build-arg TAG=$IMAGE_TAG --build-arg GITHUB_REPOSITORY=$REPO_NAME"
-if [ "$PUSH_MODE" = true ]; then
-  BUILD_ARGS="$BUILD_ARGS --cache-from=$IMAGE_PATH_PREFIX/noaa-decoder-cache --cache-to=$IMAGE_PATH_PREFIX/noaa-decoder-cache"
-else
-  BUILD_ARGS="$BUILD_ARGS"
-fi
-$CONTAINER_TOOL build $BUILD_ARGS -f Dockerfile .
-cd ..
-if [ "$PUSH_MODE" = true ]; then
-  $CONTAINER_TOOL push "$IMAGE_PATH_PREFIX/noaa-decoder:$IMAGE_TAG"
-fi
-
 # Build satdump decoder
 cd satdump
 BUILD_ARGS="--pull=missing --platform $PLATFORM -t $IMAGE_PATH_PREFIX/satdump-decoder:$IMAGE_TAG --build-arg TAG=$IMAGE_TAG --build-arg GITHUB_REPOSITORY=$REPO_NAME"
