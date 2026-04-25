@@ -5,6 +5,7 @@ import collections
 import errno
 import logging
 import os
+import threading
 import time
 import uuid
 from typing import Callable, Deque, Dict, List, Optional
@@ -57,6 +58,10 @@ class TransferService:
         self._num_workers = num_workers
         self._queue: asyncio.Queue[TransferRequest] = asyncio.Queue()
         self._stop = asyncio.Event()
+        # Mirror of _stop that an executor-thread copy worker can poll. Plain
+        # threading.Event because the asyncio.Event isn't safe to read from
+        # another thread without scheduling back onto the loop.
+        self._stop_thread = threading.Event()
         self._workers: List[asyncio.Task] = []
         self._sub_task: Optional[asyncio.Task] = None
 
@@ -105,6 +110,7 @@ class TransferService:
 
     def stop(self) -> None:
         self._stop.set()
+        self._stop_thread.set()
 
     async def _worker(self, worker_id: int) -> None:
         loop = asyncio.get_running_loop()
@@ -199,7 +205,18 @@ class TransferService:
                 return
             last_emit[0] = now
             last_copied[0] = copied
-            asyncio.run_coroutine_threadsafe(report(copied, total), loop)
+            # Loop may already be closed if we're shutting down while the
+            # executor thread is still running. run_coroutine_threadsafe
+            # would create the coroutine and then raise before scheduling
+            # it, leaving it dangling — Python emits "coroutine was never
+            # awaited". Skip cleanly and close the coroutine ourselves.
+            if loop.is_closed():
+                return
+            coro = report(copied, total)
+            try:
+                asyncio.run_coroutine_threadsafe(coro, loop)
+            except RuntimeError:
+                coro.close()
 
         try:
             await loop.run_in_executor(
@@ -208,7 +225,15 @@ class TransferService:
                 working_source,
                 working_dest,
                 throttled,
+                self._stop_thread,
             )
+        except TransferAborted:
+            # Shutting down. Leave the queue entry intact (no tombstone, no
+            # retry-with-backoff) so the upload resumes from its current
+            # offset on the next start.
+            async with self._active_lock:
+                self._active.pop(req.id, None)
+            return
         except Exception as e:
             async with self._active_lock:
                 self._active.pop(req.id, None)
@@ -372,14 +397,27 @@ class TransferService:
         )
 
 
+class TransferAborted(Exception):
+    """Raised by ``_copy_with_progress_sync`` when ``stop_event`` was set
+    mid-copy. Partial bytes are left on disk on purpose so the next attempt
+    can resume from the offset rather than retransferring."""
+
+
 def _copy_with_progress_sync(
     src: str,
     dst: str,
     report: Callable[[int, int], None],
+    stop_event: Optional[threading.Event] = None,
     buffer_size: int = 64 * 1024,
 ) -> None:
     """Resumable byte copy. Picks up partial dst files to minimise re-transfer
-    over slow NAS links — critical if the Pi reboots mid-upload."""
+    over slow NAS links — critical if the Pi reboots mid-upload.
+
+    When ``stop_event`` is set between buffer writes the copy aborts with
+    :class:`TransferAborted` so the executor thread exits promptly during
+    service shutdown — without this, a slow-but-progressing upload can keep
+    the default executor alive long enough to trigger asyncio's 300s
+    shutdown_default_executor warning."""
     total = os.path.getsize(src)
     os.makedirs(os.path.dirname(dst), exist_ok=True)
 
@@ -409,6 +447,8 @@ def _copy_with_progress_sync(
             fsrc.seek(start_offset)
             report(copied, total)
         while True:
+            if stop_event is not None and stop_event.is_set():
+                raise TransferAborted(f"stopped at {copied}/{total} bytes")
             buf = fsrc.read(buffer_size)
             if not buf:
                 break
