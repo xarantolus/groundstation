@@ -34,6 +34,7 @@ class DecodeGate:
         self._recording = False
         self._next_start: Optional[datetime.datetime] = None
         self._next_end: Optional[datetime.datetime] = None
+        self._predictor_ready = False
 
         self._timer: Optional[asyncio.Task] = None
         self._last_open: Optional[bool] = None
@@ -86,6 +87,7 @@ class DecodeGate:
     ) -> None:
         self._next_start = start_time
         self._next_end = end_time
+        self._predictor_ready = True
         self._reevaluate()
 
     def close(self) -> None:
@@ -125,6 +127,9 @@ class DecodeGate:
         self._cancel_timer()
         if self._recording:
             self._set(False, "recorder running")
+            return
+        if not self._predictor_ready:
+            self._set(False, "awaiting first pass prediction")
             return
         if self._next_start is None:
             self._set(True, "no upcoming pass")

@@ -5,6 +5,7 @@ import logging
 import os
 import platform
 import shlex
+import uuid
 from typing import Callable, List, Optional
 
 from .models import Decoder, Satellite
@@ -116,7 +117,24 @@ async def _read_stream(
         callback(f"{prefix}{buffer.decode('utf-8', errors='replace')}")
 
 
-async def _terminate(process: asyncio.subprocess.Process) -> None:
+async def _podman_kill(container_name: str) -> None:
+    """SIGKILL a container by name. Required because SIGTERM to the
+    `podman run` client process doesn't reliably propagate through bash
+    entrypoints to the actual decoder process inside the container."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "podman", "kill", "--signal", "KILL", container_name,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await asyncio.wait_for(proc.wait(), timeout=10)
+    except Exception:
+        logger.exception("podman kill %s failed", container_name)
+
+
+async def _terminate(process: asyncio.subprocess.Process, container_name: Optional[str] = None) -> None:
+    if container_name:
+        await _podman_kill(container_name)
     try:
         process.terminate()
         try:
@@ -219,11 +237,13 @@ async def run_decoder(
     for k, v in decoder.env.items():
         envs.append(f"{k}={v}")
 
+    container_name = f"gs-decoder-{uuid.uuid4().hex[:12]}"
     cmd: List[str] = [
         "podman",
         "run",
         "--rm",
         "--read-only",
+        "--name", container_name,
         *COMMON_FLAGS,
         *(["--userns=keep-id"] if not _is_root() else []),
         *sum([["-e", e] for e in envs], []),
@@ -261,15 +281,15 @@ async def run_decoder(
         )
         if not done:
             logger.warning("decoder exceeded %s min — terminating", dec_timeout)
-            await _terminate(process)
+            await _terminate(process, container_name)
             await asyncio.gather(main_task, return_exceptions=True)
         elif stop_task is not None and stop_task in done:
-            logger.info("decoder stop signalled — terminating")
+            logger.info("decoder stop signalled — terminating container %s", container_name)
             killed_by_stop = True
-            await _terminate(process)
+            await _terminate(process, container_name)
             await asyncio.gather(main_task, return_exceptions=True)
     except asyncio.CancelledError:
-        await _terminate(process)
+        await _terminate(process, container_name)
         await asyncio.gather(main_task, return_exceptions=True)
         raise
     finally:

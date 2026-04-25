@@ -20,9 +20,18 @@ class FakeClock:
 
 
 @pytest.mark.asyncio
+async def test_gate_closed_until_predictor_ready():
+    clock = FakeClock(datetime.datetime(2026, 1, 1, 10, 0, 0))
+    g = DecodeGate(safety_minutes=15, clock=clock)
+    assert not g.is_open()
+    assert "awaiting first pass prediction" in g.last_reason
+
+
+@pytest.mark.asyncio
 async def test_gate_opens_when_no_pass_no_recording():
     clock = FakeClock(datetime.datetime(2026, 1, 1, 10, 0, 0))
     g = DecodeGate(safety_minutes=15, clock=clock)
+    g.on_next_pass(None, None)
     assert g.is_open()
     assert "no upcoming pass" in g.last_reason
 
@@ -31,6 +40,7 @@ async def test_gate_opens_when_no_pass_no_recording():
 async def test_gate_closes_during_recording():
     clock = FakeClock(datetime.datetime(2026, 1, 1, 10, 0, 0))
     g = DecodeGate(safety_minutes=15, clock=clock)
+    g.on_next_pass(None, None)
     g.on_recording(True)
     assert not g.is_open()
     assert "recorder running" in g.last_reason
@@ -93,6 +103,7 @@ async def test_gate_replaces_timer_when_closer_pass_arrives():
 async def test_wait_open_unblocks():
     clock = FakeClock(datetime.datetime(2026, 1, 1, 10, 0, 0))
     g = DecodeGate(safety_minutes=15, clock=clock)
+    g.on_next_pass(None, None)
     g.on_recording(True)
 
     async def waiter():
@@ -116,7 +127,9 @@ async def test_on_change_callback_fires_on_state_change():
         clock=clock,
         on_change=lambda open_, reason: events.append((open_, reason)),
     )
-    # initial state is "no upcoming pass" (open)
+    # initial state is closed until the first prediction lands
+    assert events[-1] == (False, "awaiting first pass prediction")
+    g.on_next_pass(None, None)
     assert events[-1] == (True, "no upcoming pass")
     g.on_recording(True)
     assert events[-1] == (False, "recorder running")
@@ -135,6 +148,7 @@ async def test_gate_fails_open_on_exception():
             raise RuntimeError("boom")
 
     g = DecodeGate(safety_minutes=15, clock=clock)
+    g.on_next_pass(None, None)
     # Force an exception path by injecting a bad "next_start"
     g._next_start = Boom()  # type: ignore
     g._reevaluate()
