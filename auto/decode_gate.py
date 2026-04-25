@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import datetime
 import logging
-from typing import Callable, Optional
+from typing import AsyncIterator, Callable, Optional
 
 logger = logging.getLogger("groundstation.gate")
 
@@ -38,10 +39,34 @@ class DecodeGate:
         self._last_open: Optional[bool] = None
         self._last_reason: str = ""
 
+        self._cpu_lock = asyncio.Lock()
+        self._closed = False
+
         self._reevaluate()
 
     async def wait_open(self) -> None:
         await self._open.wait()
+
+    @contextlib.asynccontextmanager
+    async def cpu_slot(self) -> AsyncIterator[None]:
+        """Wait for the gate to open, then take the single CPU slot —
+        decoders/compressors all serialise on this so they don't fight for
+        the Pi's cores. Re-checks the gate after acquiring the lock in case
+        a recording or upcoming pass arrived while we were queueing."""
+        acquired = False
+        try:
+            while True:
+                await self._open.wait()
+                await self._cpu_lock.acquire()
+                acquired = True
+                if self._closed or self._open.is_set():
+                    break
+                self._cpu_lock.release()
+                acquired = False
+            yield
+        finally:
+            if acquired:
+                self._cpu_lock.release()
 
     def is_open(self) -> bool:
         return self._open.is_set()
@@ -65,6 +90,9 @@ class DecodeGate:
 
     def close(self) -> None:
         self._cancel_timer()
+        self._closed = True
+        # Force-open so anyone awaiting wait_open() unblocks during shutdown.
+        self._open.set()
 
     def _cancel_timer(self) -> None:
         if self._timer and not self._timer.done():

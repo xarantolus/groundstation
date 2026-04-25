@@ -202,6 +202,15 @@ def _boot_recovery(
             if not p.satellite.skip_iq_upload and p.satellite.decoder:
                 iq_zst = os.path.join(p.pass_dir, "recording.bin.zst")
                 iq_bin = os.path.join(p.pass_dir, "recording.bin")
+                # A leftover .zst.tmp means a prior compression was killed
+                # mid-write — the bytes are partial garbage, drop them.
+                iq_zst_tmp = iq_zst + ".tmp"
+                if os.path.isfile(iq_zst_tmp):
+                    try:
+                        os.remove(iq_zst_tmp)
+                        _bump("partial_zst_tmp_removed")
+                    except OSError:
+                        logger.exception("could not remove %s", iq_zst_tmp)
                 chosen: Optional[str] = None
                 compress = False
                 if os.path.isfile(iq_zst) and iq_zst not in persisted_transfer_sources:

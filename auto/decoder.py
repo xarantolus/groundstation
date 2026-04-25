@@ -118,18 +118,6 @@ class DecoderService:
                 item = self._queue.popleft()
                 self._in_queue.discard((item[0], item[1]))
 
-                gate_task = asyncio.create_task(self._gate.wait_open())
-                stop_task = asyncio.create_task(self._stop.wait())
-                await asyncio.wait(
-                    {gate_task, stop_task}, return_when=asyncio.FIRST_COMPLETED
-                )
-                if not gate_task.done():
-                    gate_task.cancel()
-                if not stop_task.done():
-                    stop_task.cancel()
-                if self._stop.is_set():
-                    break
-
                 try:
                     await self._run_one(*item)
                 except asyncio.CancelledError:
@@ -154,6 +142,8 @@ class DecoderService:
     def stop(self) -> None:
         self._stop.set()
         self._wakeup.set()
+        if self._active_kill_event is not None and not self._active_kill_event.is_set():
+            self._active_kill_event.set()
 
     async def _on_event(self, event: E.Event) -> None:
         if isinstance(event, E.RecordingCompleted):
@@ -244,15 +234,21 @@ class DecoderService:
         rc: int = -1
         crash_error: Optional[str] = None
         try:
-            rc = await run_decoder(
-                p.satellite,
-                decoder,
-                p.pass_dir,
-                output_dir,
-                log_callback=on_log,
-                timeout_minutes=effective_timeout,
-                stop_event=kill_event,
-            )
+            async with self._gate.cpu_slot():
+                if self._stop.is_set():
+                    self._active_key = None
+                    self._active_kill_event = None
+                    self._enqueue((pass_id, decoder_index, attempt), front=True)
+                    return
+                rc = await run_decoder(
+                    p.satellite,
+                    decoder,
+                    p.pass_dir,
+                    output_dir,
+                    log_callback=on_log,
+                    timeout_minutes=effective_timeout,
+                    stop_event=kill_event,
+                )
         except asyncio.CancelledError:
             self._active_key = None
             self._active_kill_event = None
@@ -266,6 +262,10 @@ class DecoderService:
 
         if rc == DECODER_KILLED_BY_STOP:
             _cleanup_new(output_dir, before, protect_shared=is_shared_dir)
+            if self._stop.is_set():
+                # Service shutdown — leave the persisted entry alone so boot
+                # recovery picks it up next run.
+                return
             logger.info(
                 "decoder %s/%s killed by recorder — re-queued at front (attempt %d unchanged)",
                 pass_id,
@@ -391,8 +391,8 @@ class DecoderService:
                     logger.exception("could not remove IQ %s", iq)
             else:
                 try:
-                    await self._gate.wait_open()
-                    compressed = await compress_file(iq)
+                    async with self._gate.cpu_slot():
+                        compressed = await compress_file(iq)
                     try:
                         os.remove(iq)
                         logger.info(

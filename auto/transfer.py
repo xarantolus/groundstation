@@ -148,10 +148,14 @@ class TransferService:
         working_dest = req.destination_path
 
         if req.compress and working_source.endswith(IQ_DATA_FILE_EXTENSION) and not req.keep_source:
-            if self._gate is not None:
-                await self._gate.wait_open()
             try:
-                working_source = await compress_file(working_source)
+                if self._gate is not None:
+                    async with self._gate.cpu_slot():
+                        if self._stop.is_set():
+                            return
+                        working_source = await compress_file(working_source)
+                else:
+                    working_source = await compress_file(working_source)
                 if not working_dest.endswith(".zst"):
                     working_dest = working_dest + ".zst"
             except Exception as e:
@@ -410,12 +414,17 @@ async def compress_file(source_path: str) -> str:
     """Stream-compresses ``source_path`` to ``.zst`` via the system ``zstd``
     binary.
 
-    Leaves the source in place — the worker removes it only after the upload
-    is confirmed. If we deleted here and the subsequent upload failed, the
-    retry would find the original file missing and drop the item, silently
-    losing data.
+    Writes to ``.zst.tmp`` and renames atomically on success — a crash
+    mid-compression leaves only the partial ``.tmp`` (which boot recovery
+    cleans up), never a partial ``.zst`` that would be mistaken for valid
+    output and uploaded as-is.
     """
     compressed = source_path + ".zst"
+    tmp = compressed + ".tmp"
+    try:
+        os.remove(tmp)
+    except OSError:
+        pass
     logger.info("compressing %s", source_path)
     proc = await asyncio.create_subprocess_exec(
         "zstd",
@@ -424,17 +433,18 @@ async def compress_file(source_path: str) -> str:
         "-f",
         source_path,
         "-o",
-        compressed,
+        tmp,
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.PIPE,
     )
     _, err = await proc.communicate()
     if proc.returncode != 0:
         try:
-            os.remove(compressed)
+            os.remove(tmp)
         except OSError:
             pass
         raise RuntimeError(
             f"zstd failed with code {proc.returncode}: {err.decode(errors='replace')}"
         )
+    os.replace(tmp, compressed)
     return compressed
