@@ -91,9 +91,19 @@ def load_config(path: str) -> GroundstationConfig:
             )
             raise SystemExit(2) from None
 
-        if sat.skip_iq_upload and not sat.decoder:
+        if sat.iq_upload != "never" and not sat.decoder:
             raise SystemExit(
-                f"{path}: satellites[{idx}] ({sat.name}): skip_iq_upload=True requires at least one decoder"
+                f"{path}: satellites[{idx}] ({sat.name}): "
+                f"iq_upload={sat.iq_upload!r} requires at least one decoder"
+            )
+        if sat.iq_upload == "on_decode" and not any(
+            d.name is not None for d in sat.decoder
+        ):
+            raise SystemExit(
+                f"{path}: satellites[{idx}] ({sat.name}): "
+                "iq_upload='on_decode' but no non-waterfall decoder is configured "
+                "— IQ would never be uploaded; set iq_upload='always' or "
+                "add a real decoder"
             )
         satellites.append(sat)
 

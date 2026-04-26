@@ -10,7 +10,14 @@ from typing import Deque, Dict, Optional, Set, Tuple
 from . import events as E
 from .bus import EventBus, run_subscriber
 from .decode_gate import DecodeGate
-from .models import GroundstationConfig, IQ_DATA_FILE_EXTENSION, Pass, PassStatus, TransferRequest
+from .models import (
+    GroundstationConfig,
+    IQ_DATA_FILE_EXTENSION,
+    Pass,
+    PassStatus,
+    TransferRequest,
+    should_upload_iq,
+)
 from .podman import DECODER_KILLED_BY_STOP, DEFAULT_DECODER_TIMEOUT_MINUTES, filter_decoder_outputs, run_decoder
 from .state import StateStore
 from .transfer import CompressionInterrupted, compress_file
@@ -413,10 +420,14 @@ class DecoderService:
 
         iq = p.recording_path
         if iq and os.path.isfile(iq):
-            if p.satellite.skip_iq_upload or not p.satellite.decoder:
+            if not should_upload_iq(p):
                 try:
                     os.remove(iq)
-                    logger.info("removed local IQ %s (skip_iq_upload)", iq)
+                    logger.info(
+                        "removed local IQ %s (iq_upload=%s)",
+                        iq,
+                        p.satellite.iq_upload,
+                    )
                 except OSError:
                     logger.exception("could not remove IQ %s", iq)
             else:

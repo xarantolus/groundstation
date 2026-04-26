@@ -20,7 +20,7 @@ from .config import load_config
 from .decode_gate import DecodeGate
 from .decoder import DecoderService
 from .logging_bus import BusLogHandler
-from .models import GroundstationConfig, Pass, PassStatus, TransferRequest
+from .models import GroundstationConfig, Pass, PassStatus, TransferRequest, should_upload_iq
 from .pass_predictor import PassPredictor
 from .recorder import RecorderService
 from .scheduler import SchedulerService
@@ -101,10 +101,13 @@ def _recover_interrupted_pass(
             logger.exception("could not annotate info.json for %s", p.id)
 
     iq = Path(p.pass_dir) / "recording.bin"
-    if iq.exists() and iq.stat().st_size > 0 and not p.satellite.skip_iq_upload:
-        dst = os.path.join(
-            "",  # filled by caller using cfg.nas_directory
-        )
+    # Partial recordings have no decode results yet, so `on_decode` can't
+    # prove the pass was worth uploading — only `always` keeps the partial.
+    if (
+        iq.exists()
+        and iq.stat().st_size > 0
+        and p.satellite.iq_upload == "always"
+    ):
         return TransferRequest(
             id=str(uuid.uuid4()),
             source_path=str(iq),
@@ -196,7 +199,7 @@ def _boot_recovery(
             # between compression and transfer_put. Reconstruct the upload
             # here using whatever survived on disk. Also runs for passes
             # just advanced from DECODING above.
-            if not p.satellite.skip_iq_upload and p.satellite.decoder:
+            if should_upload_iq(p):
                 iq_zst = os.path.join(p.pass_dir, "recording.bin.zst")
                 iq_bin = os.path.join(p.pass_dir, "recording.bin")
                 # A leftover .zst.tmp means a prior compression was killed

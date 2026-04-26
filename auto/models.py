@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import datetime
 from enum import Enum
-from typing import Any, List, Optional
+from typing import Any, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+IQUploadMode = Literal["never", "on_decode", "always"]
 
 
 IQ_DATA_FILE_EXTENSION = ".bin"
@@ -43,7 +46,7 @@ class Satellite(BaseModel):
     lo_offset: float = 0.0
     gain: int | None = None
     priority: int = 0
-    skip_iq_upload: bool = False
+    iq_upload: IQUploadMode = "on_decode"
     decoder: List[Decoder] = Field(default_factory=list)
 
     @field_validator("norad", mode="before")
@@ -114,6 +117,26 @@ class Pass(BaseModel):
         ts = pass_info.start_time.strftime("%Y-%m-%d_%H-%M-%S")
         safe_name = sat.name.replace(" ", "_").replace("/", "_")
         return f"{safe_name}_{ts}"
+
+
+def should_upload_iq(p: Pass) -> bool:
+    """Decide whether to upload the raw IQ recording for a pass.
+
+    `on_decode` (the default) requires that at least one non-waterfall
+    decoder produced output that survived its filters — i.e. its index is
+    in `decoders_done`. Waterfall decoders are identified by `name is None`,
+    matching the convention used in `auto/decoder.py` for output-dir routing.
+    """
+    mode = p.satellite.iq_upload
+    if mode == "never" or not p.satellite.decoder:
+        return False
+    if mode == "always":
+        return True
+    return any(
+        idx in p.decoders_done
+        for idx, dec in enumerate(p.satellite.decoder)
+        if dec.name is not None
+    )
 
 
 class TransferRequest(BaseModel):

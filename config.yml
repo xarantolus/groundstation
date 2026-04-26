@@ -26,7 +26,7 @@ satellites:
         env:
           PIPELINE_NAME: meteor_m2-x_lrpt_80k
         min_files: 10
-    skip_iq_upload: true
+    iq_upload: never
 
   - name: Meteor M2-4
     norad: 59051
@@ -55,7 +55,7 @@ satellites:
         env:
           PIPELINE_NAME: meteor_m2-x_lrpt_80k
         min_files: 10
-    skip_iq_upload: true
+    iq_upload: never
 
   # AX100 satellites
   - name: AISTECHSAT-2
@@ -73,6 +73,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+    iq_upload: always
 
   - name: CATSAT
     norad: 60246
@@ -134,6 +135,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+    iq_upload: always
   - name: MIMAN
     norad: 52900
     frequency: 436.500e6
@@ -164,6 +166,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+    iq_upload: always
   - name: SNIPE-1
     norad: 56749
     frequency: 435.450e6
@@ -179,6 +182,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+    iq_upload: always
   - name: SNIPE-2
     norad: 56745
     frequency: 436.000e6
@@ -194,6 +198,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+    iq_upload: always
   - name: SNIPE-4
     norad: 56744
     frequency: 437.800e6
@@ -209,6 +214,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+    iq_upload: always
   - name: Suomi 100
     norad: 43804
     frequency: 437.775e6
