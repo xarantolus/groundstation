@@ -218,6 +218,12 @@ class DecoderService:
         if base_timeout is not None and attempt > 0:
             effective_timeout = base_timeout * (DECODE_RETRY_TIMEOUT_FACTOR ** attempt)
 
+        banner = f">>> Starting decoder: {decoder_name}"
+        if attempt > 0:
+            banner += f" (retry {attempt})"
+        await self._bus.publish(
+            E.DecodeLog(pass_id=pass_id, decoder_index=decoder_index, line=banner)
+        )
         await self._bus.publish(
             E.DecodeStarted(
                 pass_id=pass_id, decoder_index=decoder_index, decoder_name=decoder_name

@@ -194,7 +194,7 @@ class _TUIRenderable:
 
     def _decoder_log_panel(self, snap) -> Panel:
         lines = [
-            Text(l.line, style="dim")
+            Text(f"{l.ts.strftime('%H:%M:%S')} {l.line.rstrip()}", style="dim")
             for l in snap.decoder_log[-200:]
         ]
         suffix = f" · {snap.pending_decoders} waiting" if snap.pending_decoders else ""
