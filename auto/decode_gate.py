@@ -22,7 +22,7 @@ class DecodeGate:
 
     def __init__(
         self,
-        safety_minutes: float = 3.0,
+        safety_minutes: float = 1.0,
         clock: Callable[[], datetime.datetime] = datetime.datetime.now,
         on_change: Optional[Callable[[bool, str], None]] = None,
     ) -> None:
@@ -50,26 +50,54 @@ class DecodeGate:
         await self._open.wait()
 
     @contextlib.asynccontextmanager
-    async def cpu_slot(self) -> AsyncIterator[asyncio.Event]:
+    async def cpu_slot(
+        self, min_safety_minutes: Optional[float] = None
+    ) -> AsyncIterator[asyncio.Event]:
         """Wait for the gate to open, then take the single CPU slot —
         decoders/compressors all serialise on this so they don't fight for
         the Pi's cores. Re-checks the gate after acquiring the lock in case
         a recording or upcoming pass arrived while we were queueing.
+
+        ``min_safety_minutes`` overrides the gate's default safety for this
+        acquirer: e.g. compression (~10 min) passes 10.0 to avoid being
+        killed mid-run by a pass the gate would still consider "safe enough"
+        for a quick decoder. If the next pass is sooner than that, the slot
+        is released and we wait for the pass to end before retrying.
 
         Yields a kill ``asyncio.Event`` that gets set when the recorder
         starts mid-run — callers should pass it through to their subprocess
         so that compression / decoding can be terminated and re-queued."""
         acquired = False
         kill = asyncio.Event()
+        extra_safety = (
+            datetime.timedelta(minutes=min_safety_minutes)
+            if min_safety_minutes is not None
+            else None
+        )
         try:
             while True:
                 await self._open.wait()
                 await self._cpu_lock.acquire()
                 acquired = True
-                if self._closed or self._open.is_set():
+                if self._closed:
                     break
-                self._cpu_lock.release()
-                acquired = False
+                if not self._open.is_set():
+                    self._cpu_lock.release()
+                    acquired = False
+                    continue
+                if extra_safety is not None and self._next_start is not None:
+                    now = self._clock()
+                    if self._next_start - now < extra_safety:
+                        self._cpu_lock.release()
+                        acquired = False
+                        wait_until = self._next_end or (
+                            self._next_start + datetime.timedelta(minutes=30)
+                        )
+                        delta = (wait_until - now).total_seconds()
+                        if delta > 0:
+                            await asyncio.sleep(delta)
+                        continue
+                break
             self._active_kill = kill
             yield kill
         finally:
@@ -121,12 +149,17 @@ class DecodeGate:
 
     def _set(self, open_: bool, reason: str) -> None:
         changed = open_ != self._last_open or reason != self._last_reason
+        was_open = self._last_open
         self._last_open = open_
         self._last_reason = reason
         if open_:
             self._open.set()
         else:
             self._open.clear()
+            # Closing the gate kills active CPU work so the recorder has
+            # the cores by the safety boundary, not just at AOS-30s.
+            if was_open is True and self._active_kill is not None:
+                self._active_kill.set()
         if changed and self._on_change:
             try:
                 self._on_change(open_, reason)

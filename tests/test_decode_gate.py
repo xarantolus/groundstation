@@ -142,6 +142,78 @@ async def test_on_change_callback_fires_on_state_change():
 
 
 @pytest.mark.asyncio
+async def test_cpu_slot_min_safety_defers_when_pass_is_close():
+    # Default gate safety = 3 min. Compression asks for 10 min — at 5 min
+    # before pass, the gate is open for decoders but compression must wait.
+    clock = FakeClock(datetime.datetime(2026, 1, 1, 10, 0, 0))
+    g = DecodeGate(safety_minutes=3, clock=clock)
+    g.mark_ready()
+    pass_start = clock.t + datetime.timedelta(minutes=5)
+    pass_end = pass_start + datetime.timedelta(minutes=5)
+    g.on_next_pass(pass_start, pass_end)
+    assert g.is_open()  # 5 min > 3 min safety, decoder slot would proceed
+
+    entered = asyncio.Event()
+
+    async def take_compression_slot():
+        async with g.cpu_slot(min_safety_minutes=10.0):
+            entered.set()
+
+    task = asyncio.create_task(take_compression_slot())
+    await asyncio.sleep(0.05)
+    assert not entered.is_set(), "compression must not start with pass within 10 min"
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_cpu_slot_min_safety_runs_when_pass_is_far():
+    clock = FakeClock(datetime.datetime(2026, 1, 1, 10, 0, 0))
+    g = DecodeGate(safety_minutes=3, clock=clock)
+    g.mark_ready()
+    pass_start = clock.t + datetime.timedelta(minutes=30)
+    pass_end = pass_start + datetime.timedelta(minutes=10)
+    g.on_next_pass(pass_start, pass_end)
+
+    async def take_slot():
+        async with g.cpu_slot(min_safety_minutes=10.0):
+            return True
+
+    result = await asyncio.wait_for(take_slot(), timeout=1.0)
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_gate_close_kills_active_slot():
+    # Active CPU work must die when the gate closes for any reason — not
+    # just when the recorder actually starts. Otherwise compression keeps
+    # burning cores during the safety window.
+    clock = FakeClock(datetime.datetime(2026, 1, 1, 10, 0, 0))
+    g = DecodeGate(safety_minutes=3, clock=clock)
+    g.mark_ready()
+    pass_start = clock.t + datetime.timedelta(minutes=30)
+    pass_end = pass_start + datetime.timedelta(minutes=10)
+    g.on_next_pass(pass_start, pass_end)
+    assert g.is_open()
+
+    killed = asyncio.Event()
+
+    async def hold_slot():
+        async with g.cpu_slot() as kill:
+            await asyncio.wait_for(kill.wait(), timeout=1.0)
+            killed.set()
+
+    task = asyncio.create_task(hold_slot())
+    await asyncio.sleep(0.01)
+    # Move the predicted pass closer so the gate transitions open→closed.
+    g.on_next_pass(clock.t + datetime.timedelta(minutes=2), pass_end)
+    assert not g.is_open()
+    await asyncio.wait_for(task, timeout=1.0)
+    assert killed.is_set()
+
+
+@pytest.mark.asyncio
 async def test_gate_fails_open_on_exception():
     clock = FakeClock(datetime.datetime(2026, 1, 1, 10, 0, 0))
 

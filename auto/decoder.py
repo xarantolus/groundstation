@@ -20,6 +20,12 @@ _decoder_output_logger = logging.getLogger("groundstation.decoders.output")
 
 MAX_DECODE_ATTEMPTS = 3
 DECODE_RETRY_TIMEOUT_FACTOR = 0.3
+# Asymmetric pre-pass thresholds (the gate's own safety_minutes is the
+# kill threshold — set low so an in-flight job has the most time to finish):
+#   *_START_SAFETY = don't start a new job if pass is closer than this.
+#   gate.safety_minutes = kill in-flight job if pass gets closer than this.
+DECODE_START_SAFETY_MINUTES = 3.0
+COMPRESSION_START_SAFETY_MINUTES = 10.0
 
 
 class DecoderService:
@@ -238,7 +244,9 @@ class DecoderService:
         rc: int = -1
         crash_error: Optional[str] = None
         try:
-            async with self._gate.cpu_slot() as kill_event:
+            async with self._gate.cpu_slot(
+                min_safety_minutes=DECODE_START_SAFETY_MINUTES
+            ) as kill_event:
                 self._active_kill_event = kill_event
                 if self._stop.is_set():
                     self._enqueue((pass_id, decoder_index, attempt), front=True)
@@ -412,7 +420,9 @@ class DecoderService:
                     logger.exception("could not remove IQ %s", iq)
             else:
                 try:
-                    async with self._gate.cpu_slot() as kill_event:
+                    async with self._gate.cpu_slot(
+                        min_safety_minutes=COMPRESSION_START_SAFETY_MINUTES
+                    ) as kill_event:
                         compressed = await compress_file(iq, stop_event=kill_event)
                     try:
                         os.remove(iq)

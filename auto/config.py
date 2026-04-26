@@ -109,7 +109,7 @@ def load_config(path: str) -> GroundstationConfig:
                 raw.get("pass_start_elevation_threshold_deg", 5.0)
             ),
             update_interval_hours=float(raw.get("update_interval_hours", 2.0)),
-            decode_safety_minutes=float(raw.get("decode_safety_minutes", 3.0)),
+            decode_safety_minutes=float(raw.get("decode_safety_minutes", 1.0)),
             web_host=str(raw.get("web_host", "0.0.0.0")),
             web_port=int(raw.get("web_port", 80)),
             n2yo_api_key=os.getenv("N2YO_API_KEY"),
