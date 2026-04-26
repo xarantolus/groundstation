@@ -94,16 +94,10 @@ def has_crc(flags: int) -> bool:
 
 
 def verify_crc_data_only(payload_with_crc: bytes) -> bool:
-    """CRC32-C over payload only (CSP1 default). Last 4 bytes are the CRC."""
+    """CRC32-C over payload only — libcsp 1.6 / CSP 1.x layout. Last 4 bytes
+    of the input are the CRC. CSP 2.1+ would prepend the header to the
+    CRC'd region, but we target libcsp 1.6 across the AX100 fleet."""
     if len(payload_with_crc) < 4:
         return False
     expected = struct.unpack(">I", payload_with_crc[-4:])[0]
     return crc32c_fn(payload_with_crc[:-4]) == expected
-
-
-def verify_crc_with_header(header: bytes, payload_with_crc: bytes) -> bool:
-    """CRC32-C over header + payload (some CSP variants). Last 4 bytes are the CRC."""
-    if len(payload_with_crc) < 4:
-        return False
-    expected = struct.unpack(">I", payload_with_crc[-4:])[0]
-    return crc32c_fn(header + payload_with_crc[:-4]) == expected

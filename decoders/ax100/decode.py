@@ -2,9 +2,9 @@ import argparse
 import sys
 
 from csp_helpers import (
+    has_crc,
     parse_header,
     verify_crc_data_only,
-    verify_crc_with_header,
 )
 
 
@@ -30,8 +30,8 @@ def scan_packets(raw: bytes, max_payload: int, filter_src: int | None,
         # Try every possible payload+crc length (min 4 bytes for CRC alone)
         for end in range(offset + 8, min(offset + 4 + max_payload + 4, length) + 1):
             payload_with_crc = raw[offset + 4:end]
-            # Try both CRC modes: data-only (CSP1 default) and header-included
-            if verify_crc_data_only(payload_with_crc) or verify_crc_with_header(hdr_bytes, payload_with_crc):
+            # libcsp 1.6 (CSP 1.x): CRC32-C is over the payload only.
+            if verify_crc_data_only(payload_with_crc):
                 actual_payload = payload_with_crc[:-4]
                 total = end - offset
                 results.append({
@@ -105,12 +105,28 @@ def parse_kiss_frames(raw: bytes, filter_src: int | None,
             continue
         if filter_dst is not None and hdr["dst"] != filter_dst:
             continue
+
+        if has_crc(hdr["flags"]):
+            payload_with_crc = body[4:]
+            if len(payload_with_crc) < 4:
+                # Header says CRC is appended but the frame is too short to
+                # contain one. Surface the packet anyway with crc_ok=False.
+                crc_ok = False
+                payload = payload_with_crc
+            else:
+                # libcsp 1.6 (CSP 1.x): CRC32-C is over the payload only.
+                crc_ok = verify_crc_data_only(payload_with_crc)
+                payload = payload_with_crc[:-4]
+        else:
+            crc_ok = None
+            payload = body[4:]
+
         results.append({
             "offset": start,
             "header": hdr,
             "header_raw": hdr_bytes,
-            "payload": body[4:],
-            "crc_ok": None,
+            "payload": payload,
+            "crc_ok": crc_ok,
             "total_len": end - start + 1,
         })
     return results
