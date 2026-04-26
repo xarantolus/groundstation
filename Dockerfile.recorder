@@ -6,9 +6,13 @@ FROM ${GHCR_REGISTRY}/${GITHUB_REPOSITORY}/gs:${TAG}
 
 COPY flowgraphs/recorder.grc /tmp/recorder.grc
 
+# grcc emits recorder.py plus one sibling file per Embedded Python Block
+# (recorder_epy_block_0.py, etc.) — the main script imports those by name,
+# so they must live in the same directory.
 RUN cd /tmp && \
 	grcc recorder.grc && \
 	mv recorder.py /usr/local/bin/recorder.py && \
+	for f in recorder_epy_block_*.py; do [ -e "$f" ] && mv "$f" /usr/local/bin/; done && \
 	chmod +x /usr/local/bin/recorder.py
 
 CMD ["recorder.py"]
