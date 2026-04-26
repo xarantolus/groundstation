@@ -179,20 +179,17 @@ def _boot_recovery(
                 state.save_pass(p)
                 _bump("decoder_re_enqueued")
             elif p.satellite.decoder:
-                # No decoders are queued AND none are missing → every decoder
-                # has already settled. We crashed after the last decoder
-                # completed but before _after_all_decoders ran (or before it
-                # advanced status to DECODED/DONE). Fall through to the
-                # DECODED handling below so the IQ upload gets reconstructed.
-                logger.warning(
-                    "pass %s was %s but all %d decoder(s) settled — advancing to DECODED",
-                    p.id,
-                    p.status.value,
-                    len(p.satellite.decoder),
-                )
-                p.status = PassStatus.DECODED
-                state.save_pass(p)
-                _bump("advanced_to_decoded")
+                settled = set(p.decoders_done) | set(p.decoders_failed)
+                if len(settled) >= len(p.satellite.decoder):
+                    logger.warning(
+                        "pass %s was %s but all %d decoder(s) settled — advancing to DECODED",
+                        p.id,
+                        p.status.value,
+                        len(p.satellite.decoder),
+                    )
+                    p.status = PassStatus.DECODED
+                    state.save_pass(p)
+                    _bump("advanced_to_decoded")
 
         if p.status == PassStatus.DECODED:
             # Post-decode IQ upload may not have been queued if we died
