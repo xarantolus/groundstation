@@ -192,8 +192,12 @@ def prioritize(
             else:
                 group = overlapping
             _, best_sat, best_pass = max(group, key=lambda t: t[2].max_elevation)
+            considered = ", ".join(t[1].name for t in overlapping)
             logger.info(
-                "overlap: %d passes, selected %s", len(overlapping), best_sat.name
+                "overlap: %d passes (%s), selected %s",
+                len(overlapping),
+                considered,
+                best_sat.name,
             )
             picked.append((best_sat, best_pass))
             end_of_overlap = max(t[2].end_time for t in overlapping)
