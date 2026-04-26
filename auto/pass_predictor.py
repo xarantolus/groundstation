@@ -173,6 +173,9 @@ class PassPredictor:
 
 ELEVATION_SCORE_DIVISOR = 30.0
 MIN_RECORDING_WINDOW = datetime.timedelta(minutes=2)
+# Edge of a pass spent at low elevation; signal there is rarely useful, so
+# don't accept a trim that lands inside it.
+USELESS_EDGE = datetime.timedelta(minutes=1)
 
 
 def _pass_score(sat: Satellite, pi: PassInfo) -> float:
@@ -241,8 +244,16 @@ def prioritize(
         ]
 
         for cand_sat, cand_pi in ranked[1:]:
+            useful_start = cand_pi.start_time + USELESS_EDGE
+            useful_end = cand_pi.end_time - USELESS_EDGE
+            if useful_end - useful_start < MIN_RECORDING_WINDOW:
+                logger.info(
+                    "overlap: skipped %s — useful window too short",
+                    cand_sat.name,
+                )
+                continue
             sub_start, sub_end = _largest_free_subwindow(
-                cand_pi.start_time, cand_pi.end_time, occupied
+                useful_start, useful_end, occupied
             )
             free = sub_end - sub_start
             if free < MIN_RECORDING_WINDOW:

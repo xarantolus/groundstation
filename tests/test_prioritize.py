@@ -90,7 +90,7 @@ def test_transitive_chain_does_not_lose_far_high_priority():
     # A overlaps B, B overlaps C, A doesn't overlap C: pre-fix this skipped C.
     a = (_sat("A_PRI10", 10), _pi(0, 9, 30))
     b = (_sat("B_PRI7", 7), _pi(5, 9, 30))
-    c = (_sat("C_PRI10", 10), _pi(10, 8, 50))
+    c = (_sat("C_PRI10", 10), _pi(9, 8, 50))
     picked = prioritize(sorted([a, b, c], key=lambda t: t[1].start_time))
     names = _names(picked)
     assert "A_PRI10" in names
@@ -112,10 +112,8 @@ def test_partial_window_keeps_tail():
     names = _names(picked)
     assert names == ["SHORT_HIGH", "LONG_LOW"]
     long_low_pi = next(pi for s, pi in picked if s.name == "LONG_LOW")
-    assert long_low_pi.recording_start_override is not None
-    expected_start = T0 + datetime.timedelta(minutes=5)
-    assert long_low_pi.recording_start_override == expected_start
-    assert long_low_pi.recording_end_override is None
+    assert long_low_pi.recording_start_override == T0 + datetime.timedelta(minutes=5)
+    assert long_low_pi.recording_end_override == T0 + datetime.timedelta(minutes=14)
 
 
 def test_partial_window_keeps_lead():
@@ -126,8 +124,24 @@ def test_partial_window_keeps_lead():
     assert "LATE_HIGH" in names
     assert "LONG_LOW" in names
     long_low_pi = next(pi for s, pi in picked if s.name == "LONG_LOW")
-    expected_end = T0 + datetime.timedelta(minutes=10)
-    assert long_low_pi.recording_end_override == expected_end
+    assert long_low_pi.recording_start_override == T0 + datetime.timedelta(minutes=1)
+    assert long_low_pi.recording_end_override == T0 + datetime.timedelta(minutes=10)
+
+
+def test_useless_edge_dropped_when_only_first_minute_free():
+    # Winner covers minute 1 onward of the candidate; only the candidate's
+    # first minute is free, but that's the useless-edge minute → drop.
+    a = (_sat("WINNER", 10), _pi(1, 10, 30))
+    b = (_sat("LOSER", 6), _pi(0, 6, 30))
+    picked = prioritize([a, b])
+    assert _names(picked) == ["WINNER"]
+
+
+def test_short_pass_dropped_for_lacking_useful_window():
+    a = (_sat("WINNER", 10), _pi(0, 30, 30))
+    b = (_sat("TINY", 6), _pi(5, 3, 30))
+    picked = prioritize([a, b])
+    assert _names(picked) == ["WINNER"]
 
 
 def test_no_overlap_passthrough():
