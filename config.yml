@@ -13,19 +13,19 @@ satellites:
         args: --satellite_number M2-3 --fill_missing
         env:
           PIPELINE_NAME: meteor_m2_lrpt
-        min_files: 5
+        min_files: 6
       - name: x_lrpt
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
         args: --satellite_number M2-3 --fill_missing
         env:
           PIPELINE_NAME: meteor_m2-x_lrpt
-        min_files: 5
+        min_files: 6
       - name: x_lrpt_80k
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
         args: --satellite_number M2-3 --fill_missing
         env:
           PIPELINE_NAME: meteor_m2-x_lrpt_80k
-        min_files: 5
+        min_files: 6
     iq_upload: never
 
   - name: Meteor M2-4
@@ -42,19 +42,19 @@ satellites:
         args: --satellite_number M2-4 --fill_missing
         env:
           PIPELINE_NAME: meteor_m2_lrpt
-        min_files: 5
+        min_files: 6
       - name: x_lrpt
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
         args: --satellite_number M2-4 --fill_missing
         env:
           PIPELINE_NAME: meteor_m2-x_lrpt
-        min_files: 5
+        min_files: 6
       - name: x_lrpt_80k
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
         args: --satellite_number M2-4 --fill_missing
         env:
           PIPELINE_NAME: meteor_m2-x_lrpt_80k
-        min_files: 5
+        min_files: 6
     iq_upload: never
 
   # AX100 satellites
