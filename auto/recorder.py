@@ -112,6 +112,8 @@ class RecorderService:
 
         def on_log(line: str) -> None:
             stripped = line.rstrip("\n")
+            if "doppler_correction" in stripped and "set time" in stripped:
+                return
             if stripped:
                 logger.info("Recorder: %s", stripped)
             loop.create_task(
