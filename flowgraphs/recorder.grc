@@ -1,29 +1,24 @@
 options:
   parameters:
+    alias: ''
     author: Philipp Erhardt
     catch_exceptions: 'True'
-    category: '[GRC Hier Blocks]'
-    cmake_opt: ''
     comment: ''
     copyright: ''
     description: ''
-    gen_cmake: 'On'
     gen_linking: dynamic
     generate_options: no_gui
+    generator_class_name: PythonNoGuiGenerator
+    generator_module: gnuradio.grc.workflows.python_nogui
     hier_block_src_path: '.:'
     id: recorder
     max_nouts: 32 * 1024 * 1024
     output_language: python
-    placement: (0,0)
-    qt_qss_theme: ''
     realtime_scheduling: '1'
-    run: 'True'
     run_command: '{python} -u {filename}'
     run_options: run
-    sizing_mode: fixed
     thread_safe_setters: ''
     title: Generic Recorder
-    window_size: (1000,1000)
   states:
     bus_sink: false
     bus_source: false
@@ -109,7 +104,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [664, 528.0]
+    coordinate: [792, 480.0]
     rotation: 180
     state: enabled
 - name: blocks_selector_0
@@ -132,7 +127,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [320, 320.0]
+    coordinate: [440, 264.0]
     rotation: 0
     state: enabled
 - name: blocks_selector_0_0
@@ -155,7 +150,41 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1000, 352.0]
+    coordinate: [1080, 264.0]
+    rotation: 0
+    state: enabled
+- name: epy_block_0
+  id: epy_block
+  parameters:
+    _source_code: "\"\"\"\nEmbedded Python Blocks:\n\nEach time this file is saved,\
+      \ GRC will instantiate the first class it finds\nto get ports and parameters\
+      \ of your block. The arguments to __init__  will\nbe the parameters. All of\
+      \ them are required to have default values!\n\"\"\"\nimport time\nimport pmt\n\
+      import numpy as np\nfrom gnuradio import gr\n\nclass blk(gr.sync_block):  #\
+      \ other base classes are basic_block, decim_block, interp_block\n    \"\"\"\
+      Embedded Python Block example - a simple multiply const\"\"\"\n\n    def __init__(self):\n\
+      \        gr.sync_block.__init__(\n            self,\n            name=\"rx_time\
+      \ tagger\",\n            in_sig=[np.complex64],\n            out_sig=[np.complex64],\n\
+      \        )\n        self._tagged = False\n\n    def work(self, input_items,\
+      \ output_items):\n        n = len(input_items[0])\n        output_items[0][:n]\
+      \ = input_items[0][:n]\n        if not self._tagged and n > 0:\n           \
+      \ now = time.time()\n            full = int(now)\n            frac = now - full\n\
+      \            self.add_item_tag(\n                0,\n                self.nitems_written(0),\n\
+      \                pmt.intern(\"rx_time\"),\n                pmt.make_tuple(pmt.from_uint64(full),\
+      \ pmt.from_double(frac)),\n            )\n            self._tagged = True\n\
+      \        return n\n"
+    affinity: ''
+    alias: ''
+    comment: ''
+    maxoutbuf: '0'
+    minoutbuf: '0'
+  states:
+    _io_cache: ('rx_time tagger', 'blk', [], [('0', 'complex', 1)], [('0', 'complex',
+      1)], 'Embedded Python Block example - a simple multiply const', [])
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [280, 304.0]
     rotation: 0
     state: enabled
 - name: freq_xlating_fir_filter_xxx_0
@@ -175,7 +204,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [520, 216.0]
+    coordinate: [632, 184.0]
     rotation: 0
     state: enabled
 - name: import_0
@@ -277,7 +306,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [792, 216.0]
+    coordinate: [864, 184.0]
     rotation: 0
     state: enabled
 - name: rtlsdr_source_0_0
@@ -620,7 +649,7 @@ blocks:
     nchan: '1'
     num_mboards: '1'
     sample_rate: fs_capture if lo_offset else samp_rate
-    sync: sync
+    sync: pc_clock
     time_source0: ''
     time_source1: ''
     time_source2: ''
@@ -634,7 +663,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [24, 212.0]
+    coordinate: [24, 192.0]
     rotation: 0
     state: enabled
 - name: satellites_doppler_correction_0
@@ -647,13 +676,13 @@ blocks:
     maxoutbuf: '0'
     minoutbuf: '0'
     samp_rate: samp_rate
-    t0: time.time()
+    t0: '0'
     timesync_tag: '""'
   states:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [928, 528.0]
+    coordinate: [1064, 480.0]
     rotation: 180
     state: enabled
 - name: snippet_0
@@ -672,7 +701,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1056, 216.0]
+    coordinate: [48, 512.0]
     rotation: 0
     state: enabled
 
@@ -680,11 +709,12 @@ connections:
 - [blocks_selector_0, '0', freq_xlating_fir_filter_xxx_0, '0']
 - [blocks_selector_0, '1', blocks_selector_0_0, '1']
 - [blocks_selector_0_0, '0', satellites_doppler_correction_0, '0']
+- [epy_block_0, '0', blocks_selector_0, '0']
 - [freq_xlating_fir_filter_xxx_0, '0', rational_resampler_xxx_0, '0']
 - [rational_resampler_xxx_0, '0', blocks_selector_0_0, '0']
-- [rtlsdr_source_0_0, '0', blocks_selector_0, '0']
+- [rtlsdr_source_0_0, '0', epy_block_0, '0']
 - [satellites_doppler_correction_0, '0', blocks_file_sink_0, '0']
 
 metadata:
   file_format: 1
-  grc_version: 3.10.11.0
+  grc_version: gab049f6

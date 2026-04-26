@@ -14,4 +14,6 @@ exec python3 "$SCRIPT_DIR/waterfall.py" \
   "$OUTPUT_DIR/waterfall.png" \
   --samp-rate "$SAMP_RATE" \
   --center-freq "${FREQUENCY:-0}" \
-  --bandwidth "${BANDWIDTH:-0}"
+  --bandwidth "${BANDWIDTH:-0}" \
+  --satellite-name "${SATELLITE_NAME:-}" \
+  --pass-start "${PASS_START:-}"

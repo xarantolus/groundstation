@@ -259,6 +259,7 @@ class DecoderService:
                     log_callback=on_log,
                     timeout_minutes=effective_timeout,
                     stop_event=kill_event,
+                    pass_start=p.pass_info.start_time,
                 )
         except asyncio.CancelledError:
             self._active_key = None

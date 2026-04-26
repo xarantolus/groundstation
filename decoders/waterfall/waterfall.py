@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import os
 import sys
 from typing import Optional, Tuple
@@ -15,6 +16,24 @@ import numpy as np  # noqa: E402
 
 
 BYTES_PER_COMPLEX = 8
+
+
+def _format_pass_start(s: str) -> str:
+    """Render an ISO-8601 pass-start string in the container's local time
+    (mounted from the host's /etc/localtime), e.g. `2026-04-26 14:34 CEST`.
+    Falls back to the raw input on parse failure; returns "" for empty input."""
+    if not s:
+        return ""
+    try:
+        dt = datetime.datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return s
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    local = dt.astimezone()
+    tzname = local.strftime("%Z") or local.tzname() or ""
+    base = local.strftime("%Y-%m-%d %H:%M")
+    return f"{base} {tzname}".rstrip()
 
 
 def _plan(total_complex: int, nfft: int, target_rows: int) -> Tuple[int, int]:
@@ -74,6 +93,8 @@ def render(
     baseline: bool = True,
     pct_lo: float = 5.0,
     pct_hi: float = 99.5,
+    satellite_name: str = "",
+    pass_start: str = "",
 ) -> Tuple[float, float]:
     """Save the waterfall PNG. Returns the (vmin, vmax) that were used."""
     nfft = spec.shape[1]
@@ -119,8 +140,14 @@ def render(
         title_parts.append(f"Center {center_freq / 1e6:.4f} MHz")
     bw_for_title = bandwidth if bandwidth else samp_rate
     title_parts.append(f"BW {bw_for_title / 1e3:.1f} kHz")
-    title_parts.append(f"nfft={nfft}")
-    plt.title(" | ".join(title_parts))
+    bottom_line = " | ".join(title_parts)
+
+    top_bits = [s for s in (satellite_name, _format_pass_start(pass_start)) if s]
+    if top_bits:
+        title = " — ".join(top_bits) + "\n" + bottom_line
+    else:
+        title = bottom_line
+    plt.title(title)
 
     cbar = plt.colorbar(aspect=50)
     cbar.set_label(cbar_label)
@@ -152,6 +179,10 @@ def main(argv: Optional[list] = None) -> int:
                     help="lower percentile for color floor (default 5)")
     ap.add_argument("--pct-hi", type=float, default=99.5,
                     help="upper percentile for color ceiling (default 99.5)")
+    ap.add_argument("--satellite-name", default="",
+                    help="satellite name to show in the title")
+    ap.add_argument("--pass-start", default="",
+                    help="pass start time (ISO-8601, UTC) to show in the title")
     args = ap.parse_args(argv)
 
     spec, nfft_per_row, pass_seconds = compute_spectrogram(
@@ -171,6 +202,8 @@ def main(argv: Optional[list] = None) -> int:
         baseline=not args.no_baseline,
         pct_lo=args.pct_lo,
         pct_hi=args.pct_hi,
+        satellite_name=args.satellite_name,
+        pass_start=args.pass_start,
     )
     print(
         f"waterfall: {args.output_file} "

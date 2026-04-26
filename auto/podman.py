@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import os
 import platform
@@ -54,10 +55,35 @@ def _memory_limit_mb() -> Optional[int]:
 
 _MEMORY_LIMIT_MB = _memory_limit_mb()
 
+def _host_timezone() -> Optional[str]:
+    """IANA timezone name of the host, e.g. 'Europe/Berlin'. None if unknown.
+    Used so containers can render local times the way the operator expects."""
+    try:
+        with open("/etc/timezone") as f:
+            name = f.read().strip()
+            if name:
+                return name
+    except (FileNotFoundError, IsADirectoryError, PermissionError, OSError):
+        pass
+    try:
+        target = os.readlink("/etc/localtime")
+        marker = "zoneinfo/"
+        idx = target.find(marker)
+        if idx >= 0:
+            return target[idx + len(marker):]
+    except OSError:
+        pass
+    return None
+
+
+_HOST_TZ = _host_timezone()
+
 COMMON_FLAGS: List[str] = [
     "--pull=never",
     "-v",
     f"{os.path.expanduser('~')}/.config/gnuradio/prefs:/root/.config/gnuradio/prefs:z",
+    "-v",
+    "/etc/localtime:/etc/localtime:ro",
 ]
 
 if _MEMORY_LIMIT_MB:
@@ -297,6 +323,7 @@ async def run_decoder(
     log_callback: Optional[Callable[[str], None]] = None,
     timeout_minutes: float | None = None,
     stop_event: Optional[asyncio.Event] = None,
+    pass_start: Optional[datetime.datetime] = None,
 ) -> int:
     if timeout_minutes is not None:
         dec_timeout = timeout_minutes
@@ -316,7 +343,17 @@ async def run_decoder(
         f"BANDWIDTH={sat.bandwidth}",
         f"SAMP_RATE={sat.sample_rate}",
         f"LO_OFFSET={sat.lo_offset}",
+        f"SATELLITE_NAME={sat.name}",
     ]
+    if _HOST_TZ:
+        envs.append(f"TZ={_HOST_TZ}")
+    if pass_start is not None:
+        # Naive datetimes from pass_predictor are system local time
+        # (ephem.localtime); .astimezone(utc) handles both naive and aware.
+        pass_start_utc = pass_start.astimezone(datetime.timezone.utc)
+        envs.append(
+            f"PASS_START={pass_start_utc.strftime('%Y-%m-%dT%H:%M:%SZ')}"
+        )
     if sat.gain is not None:
         envs.append(f"GAIN={sat.gain}")
     for k, v in decoder.env.items():
