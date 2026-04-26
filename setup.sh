@@ -3,8 +3,9 @@
 
 if [ -z "$GITHUB_REPOSITORY_OWNER" ]; then
   REPO_URL=$(git config --get remote.origin.url)
-  if [[ $REPO_URL =~ github\.com[:/]([^/]+)/([^/]+?)(\.git)?/?$ ]]; then
-    REPO_NAME="$(echo "${BASH_REMATCH[1]}/${BASH_REMATCH[2]}" | tr '[:upper:]' '[:lower:]')"
+  if [[ $REPO_URL =~ github\.com[:/]([^/]+)/([^/]+) ]]; then
+    REPO_NAME="${BASH_REMATCH[1]}/${BASH_REMATCH[2]%.git}"
+    REPO_NAME="$(echo "$REPO_NAME" | tr '[:upper:]' '[:lower:]')"
   else
     echo "Error: Unable to extract repository information from git URL." >&2
     exit 1
