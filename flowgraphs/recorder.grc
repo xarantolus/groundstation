@@ -156,31 +156,37 @@ blocks:
 - name: epy_block_0
   id: epy_block
   parameters:
-    _source_code: "\"\"\"\nEmbedded Python Blocks:\n\nEach time this file is saved,\
-      \ GRC will instantiate the first class it finds\nto get ports and parameters\
-      \ of your block. The arguments to __init__  will\nbe the parameters. All of\
-      \ them are required to have default values!\n\"\"\"\nimport time\nimport pmt\n\
-      import numpy as np\nfrom gnuradio import gr\n\nclass blk(gr.sync_block):  #\
-      \ other base classes are basic_block, decim_block, interp_block\n    \"\"\"\
-      Embedded Python Block example - a simple multiply const\"\"\"\n\n    def __init__(self):\n\
-      \        gr.sync_block.__init__(\n            self,\n            name=\"rx_time\
-      \ tagger\",\n            in_sig=[np.complex64],\n            out_sig=[np.complex64],\n\
-      \        )\n        self._tagged = False\n\n    def work(self, input_items,\
-      \ output_items):\n        n = len(input_items[0])\n        output_items[0][:n]\
-      \ = input_items[0][:n]\n        if not self._tagged and n > 0:\n           \
-      \ now = time.time()\n            full = int(now)\n            frac = now - full\n\
-      \            self.add_item_tag(\n                0,\n                self.nitems_written(0),\n\
-      \                pmt.intern(\"rx_time\"),\n                pmt.make_tuple(pmt.from_uint64(full),\
-      \ pmt.from_double(frac)),\n            )\n            self._tagged = True\n\
-      \        return n\n"
+    _source_code: "import time\nimport pmt\nimport numpy as np\nfrom gnuradio import\
+      \ gr\n\n\nclass blk(gr.sync_block):\n    \"\"\"Periodically tag rx_time so gr-satellites\
+      \ doppler_correction stays\n    anchored to wall-clock time even when the RTL-SDR\
+      \ drops samples.\n\n    The osmosdr/RTL-SDR backend doesn't emit rx_time itself\
+      \ and doesn't\n    surface USB overflows as tags, so the doppler block has no\
+      \ other way\n    to discover that its sample-count-derived clock has drifted.\n\
+      \    \"\"\"\n\n    def __init__(self, tag_interval_s=1.0):\n        gr.sync_block.__init__(\n\
+      \            self,\n            name=\"rx_time tagger\",\n            in_sig=[np.complex64],\n\
+      \            out_sig=[np.complex64],\n        )\n        self._interval = float(tag_interval_s)\n\
+      \        self._last_tag_time = 0.0  # forces a tag on the very first work()\n\
+      \n    def work(self, input_items, output_items):\n        n = len(input_items[0])\n\
+      \        output_items[0][:n] = input_items[0][:n]\n        if n > 0:\n     \
+      \       now = time.time()\n            if now - self._last_tag_time >= self._interval:\n\
+      \                full = int(now)\n                frac = now - full\n      \
+      \          self.add_item_tag(\n                    0,\n                    self.nitems_written(0),\n\
+      \                    pmt.intern(\"rx_time\"),\n                    pmt.make_tuple(pmt.from_uint64(full),\
+      \ pmt.from_double(frac)),\n                )\n                self._last_tag_time\
+      \ = now\n        return n\n"
     affinity: ''
     alias: ''
     comment: ''
     maxoutbuf: '0'
     minoutbuf: '0'
+    tag_interval_s: '1'
   states:
-    _io_cache: ('rx_time tagger', 'blk', [], [('0', 'complex', 1)], [('0', 'complex',
-      1)], 'Embedded Python Block example - a simple multiply const', [])
+    _io_cache: ('rx_time tagger', 'blk', [('tag_interval_s', '1.0')], [('0', 'complex',
+      1)], [('0', 'complex', 1)], "Periodically tag rx_time so gr-satellites doppler_correction
+      stays\nanchored to wall-clock time even when the RTL-SDR drops samples.\n\nThe
+      osmosdr/RTL-SDR backend doesn't emit rx_time itself and doesn't\nsurface USB
+      overflows as tags, so the doppler block has no other way\nto discover that its
+      sample-count-derived clock has drifted.\n", [])
     bus_sink: false
     bus_source: false
     bus_structure: null
