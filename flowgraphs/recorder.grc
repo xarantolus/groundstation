@@ -109,15 +109,15 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [1080, 416.0]
-    rotation: 0
+    coordinate: [664, 528.0]
+    rotation: 180
     state: enabled
 - name: blocks_selector_0
   id: blocks_selector
   parameters:
     affinity: ''
     alias: ''
-    comment: ''
+    comment: Shift frequency if lo_offset != 0
     enabled: 'True'
     input_index: '0'
     maxoutbuf: '0'
@@ -132,7 +132,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [296, 320.0]
+    coordinate: [320, 320.0]
     rotation: 0
     state: enabled
 - name: blocks_selector_0_0
@@ -140,7 +140,7 @@ blocks:
   parameters:
     affinity: ''
     alias: ''
-    comment: ''
+    comment: Output is shifted signal at samp_rate
     enabled: 'True'
     input_index: 0 if lo_offset else 1
     maxoutbuf: '0'
@@ -155,7 +155,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [816, 408.0]
+    coordinate: [1000, 352.0]
     rotation: 0
     state: enabled
 - name: freq_xlating_fir_filter_xxx_0
@@ -175,7 +175,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [552, 224.0]
+    coordinate: [520, 216.0]
     rotation: 0
     state: enabled
 - name: import_0
@@ -230,6 +230,19 @@ blocks:
     coordinate: [1176, 40.0]
     rotation: 0
     state: enabled
+- name: import_1
+  id: import
+  parameters:
+    alias: ''
+    comment: ''
+    imports: import time
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1232, 160.0]
+    rotation: 0
+    state: enabled
 - name: lo_offset
   id: parameter
   parameters:
@@ -264,7 +277,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [808, 224.0]
+    coordinate: [792, 216.0]
     rotation: 0
     state: enabled
 - name: rtlsdr_source_0_0
@@ -624,6 +637,25 @@ blocks:
     coordinate: [24, 140.0]
     rotation: 0
     state: enabled
+- name: satellites_doppler_correction_0
+  id: satellites_doppler_correction
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: ''
+    file: /data/doppler.txt
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    samp_rate: samp_rate
+    t0: time.time()
+    timesync_tag: '""'
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [928, 528.0]
+    rotation: 180
+    state: enabled
 - name: snippet_0
   id: snippet
   parameters:
@@ -647,10 +679,11 @@ blocks:
 connections:
 - [blocks_selector_0, '0', freq_xlating_fir_filter_xxx_0, '0']
 - [blocks_selector_0, '1', blocks_selector_0_0, '1']
-- [blocks_selector_0_0, '0', blocks_file_sink_0, '0']
+- [blocks_selector_0_0, '0', satellites_doppler_correction_0, '0']
 - [freq_xlating_fir_filter_xxx_0, '0', rational_resampler_xxx_0, '0']
 - [rational_resampler_xxx_0, '0', blocks_selector_0_0, '0']
 - [rtlsdr_source_0_0, '0', blocks_selector_0, '0']
+- [satellites_doppler_correction_0, '0', blocks_file_sink_0, '0']
 
 metadata:
   file_format: 1

@@ -395,7 +395,9 @@ async def run_decoder(
     return process.returncode if process.returncode is not None else -1
 
 
-_PASS_DIR_PROTECTED = frozenset({"recording.bin", "recording.bin.zst", "info.json"})
+_PASS_DIR_PROTECTED = frozenset(
+    {"recording.bin", "recording.bin.zst", "info.json", "doppler.txt"}
+)
 
 
 def filter_decoder_outputs(

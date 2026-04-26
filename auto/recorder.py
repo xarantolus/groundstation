@@ -10,8 +10,10 @@ from typing import Optional
 
 from . import events as E
 from .bus import EventBus, run_subscriber
+from .doppler import write_doppler_file
 from .models import GroundstationConfig, Pass, PassStatus, TransferRequest
 from .podman import run_recorder
+from .scheduler import RECORDING_LEAD_SECONDS
 from .state import StateStore
 
 logger = logging.getLogger("groundstation.recorder")
@@ -82,6 +84,7 @@ class RecorderService:
     async def _record(self, p: Pass) -> None:
         os.makedirs(p.pass_dir, exist_ok=True)
         self._write_info_json(p)
+        self._write_doppler_file(p)
 
         p.status = PassStatus.RECORDING
         self._state.save_pass(p)
@@ -90,9 +93,6 @@ class RecorderService:
         loop = asyncio.get_running_loop()
 
         def on_log(line: str) -> None:
-            # Also push through the standard logger so it lands in the main
-            # log panel + tracker.log — matching the pre-refactor behaviour
-            # where recorder stdout was visible in the web/TUI log.
             stripped = line.rstrip("\n")
             if stripped:
                 logger.info("Recorder: %s", stripped)
@@ -129,37 +129,56 @@ class RecorderService:
         self._state.save_pass(p)
         await self._bus.publish(E.RecordingCompleted(pass_id=p.id, path=path))
 
-        # IQ pre-upload: fire a TransferQueued event so the transfer service
-        # starts shipping the raw IQ to the NAS immediately — in parallel with
-        # decoding. keep_source=True means the decoder still reads from the
-        # local file; compress=True turns it into .bin.zst on the way.
-        # IQ upload happens post-decode: see DecoderService._after_all_decoders.
-        # Decoders read recording.bin directly; once they're all done the
-        # decoder service compresses it to .zst, deletes the .bin locally, and
-        # queues the much-smaller .zst for the NAS. This keeps peak disk usage
-        # low and frees the .bin as soon as its last reader finishes.
-
-        # Upload the info.json so the NAS-side folder is self-describing even
-        # before decoder outputs arrive.
-        info_path = os.path.join(p.pass_dir, "info.json")
-        if os.path.isfile(info_path):
-            info_req = TransferRequest(
+        # IQ upload happens post-decode in DecoderService._after_all_decoders.
+        for name, label in (("info.json", "info"), ("doppler.txt", "doppler")):
+            path = os.path.join(p.pass_dir, name)
+            if not os.path.isfile(path):
+                continue
+            req = TransferRequest(
                 id=str(uuid.uuid4()),
-                source_path=info_path,
-                destination_path=self._nas_path(p, "info.json"),
+                source_path=path,
+                destination_path=self._nas_path(p, name),
                 keep_source=True,
                 compress=False,
                 pass_id=p.id,
-                label=f"{p.satellite.name} info",
+                label=f"{p.satellite.name} {label}",
             )
-            self._state.transfer_put(info_req)
-            await self._bus.publish(E.TransferQueued(request=info_req))
+            self._state.transfer_put(req)
+            await self._bus.publish(E.TransferQueued(request=req))
 
     async def _fail(self, p: Pass, reason: str) -> None:
         p.status = PassStatus.FAILED
         self._state.save_pass(p)
         logger.error("recorder failed for %s: %s", p.id, reason)
         await self._bus.publish(E.RecordingFailed(pass_id=p.id, error=reason))
+
+    def _write_doppler_file(self, p: Pass) -> None:
+        # Read by gr-satellites doppler_correction block as /data/doppler.txt.
+        # 60s buffer beyond the recording window so the block has interpolation
+        # samples on both sides of every captured IQ sample.
+        path = os.path.join(p.pass_dir, "doppler.txt")
+        buffer_s = 60
+        start = p.pass_info.start_time - datetime.timedelta(
+            seconds=RECORDING_LEAD_SECONDS + buffer_s
+        )
+        end = p.pass_info.end_time + datetime.timedelta(
+            seconds=RECORDING_TRAIL_SECONDS + buffer_s
+        )
+        try:
+            write_doppler_file(
+                tle1=p.pass_info.tle1,
+                tle2=p.pass_info.tle2,
+                sat_name=p.satellite.name,
+                lat=self._cfg.location_lat,
+                lon=self._cfg.location_lon,
+                alt_m=self._cfg.location_alt,
+                f_carrier=p.satellite.frequency,
+                start=start,
+                end=end,
+                output_path=path,
+            )
+        except Exception:
+            logger.exception("could not write doppler file for %s", p.id)
 
     def _write_info_json(self, p: Pass, extra: Optional[dict] = None) -> None:
         data = {
