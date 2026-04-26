@@ -21,6 +21,17 @@ IMAGE_PATH_PREFIX="ghcr.io/$REPO_NAME"
 CONTAINER_TOOL="podman"
 [[ "$*" == *"--docker"* ]] && CONTAINER_TOOL="docker"
 
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64) ARCH="amd64" ;;
+    aarch64) ARCH="arm64" ;;
+    armv7l) ARCH="arm/v7" ;;
+    armv6l) ARCH="arm/v6" ;;
+    *) echo "Unsupported architecture: $ARCH" >&2; exit 1 ;;
+esac
+PLATFORM="${PLATFORM:-${OS}/${ARCH}}"
+
 for name in gs satellite-recorder ax100-decoder waterfall satdump-decoder; do
-  $CONTAINER_TOOL pull "$IMAGE_PATH_PREFIX/$name:$IMAGE_TAG"
+  $CONTAINER_TOOL pull --platform "$PLATFORM" "$IMAGE_PATH_PREFIX/$name:$IMAGE_TAG"
 done
