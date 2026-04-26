@@ -15,6 +15,7 @@ fi
 
 IMAGE_TAG="$(git rev-parse --abbrev-ref HEAD | tr '[:upper:]' '[:lower:]' | tr '/' '-')"
 case "$IMAGE_TAG" in HEAD|main|master) IMAGE_TAG="latest" ;; esac
+IMAGE_TAG="${IMAGE_TAG}${TAG_SUFFIX:-}"
 
 IMAGE_PATH_PREFIX="ghcr.io/$REPO_NAME"
 
@@ -29,6 +30,10 @@ case "$ARCH" in
 esac
 
 PLATFORM="${PLATFORM:-${OS}/${ARCH}}"
+# Cache is per-arch: a multi-arch manifest tag was unreliable for podman's
+# --cache-from, which would pull the default-platform digest and miss every
+# step on the Pi. Naming the cache by ARCH gives each builder its own.
+CACHE_ARCH="$(echo "${PLATFORM##*/}" | tr '[:upper:]' '[:lower:]')"
 PUSH_MODE=false
 CONTAINER_TOOL="podman"
 [[ "$*" == *"--push"* ]] && PUSH_MODE=true
@@ -37,7 +42,7 @@ CONTAINER_TOOL="podman"
 build_image() {
   local name="$1" dockerfile="$2" pull="$3"
   local image="$IMAGE_PATH_PREFIX/$name:$IMAGE_TAG"
-  local cache="$IMAGE_PATH_PREFIX/$name-cache"
+  local cache="$IMAGE_PATH_PREFIX/$name-cache-$CACHE_ARCH"
   local cache_args=()
 
   if [ "$CONTAINER_TOOL" = "docker" ]; then

@@ -20,31 +20,80 @@ env:
   GITHUB_REPOSITORY: ${{ github.repository }}
 
 jobs:
-  build-and-deploy:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            platform: linux/amd64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up Podman
         run: |
-          sudo apt-get update
-          sudo apt-get install -y podman
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq podman
           podman --version
 
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
       - name: Login to Container Registry
-        # Using environment variables for secrets
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | podman login \
             ${{ env.REGISTRY }} \
             --username ${{ github.actor }} \
             --password-stdin
 
-      - name: Run setup script
+      - name: Build & push (${{ matrix.arch }})
         run: ./setup.sh --push
         env:
-          PLATFORM: linux/amd64,linux/arm64
+          PLATFORM: ${{ matrix.platform }}
+          TAG_SUFFIX: -${{ matrix.arch }}
+
+  merge-manifests:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Podman
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq podman
+          podman --version
+
+      - name: Login to Container Registry
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | podman login \
+            ${{ env.REGISTRY }} \
+            --username ${{ github.actor }} \
+            --password-stdin
+
+      - name: Compute tag
+        id: tag
+        run: |
+          tag="$(git rev-parse --abbrev-ref HEAD | tr '[:upper:]' '[:lower:]' | tr '/' '-')"
+          case "$tag" in HEAD|main|master) tag="latest" ;; esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Merge per-arch manifests
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+          repo_lc="$(echo "${{ env.GITHUB_REPOSITORY }}" | tr '[:upper:]' '[:lower:]')"
+          for image in gs satellite-recorder ax100-decoder waterfall satdump-decoder; do
+            full="${{ env.REGISTRY }}/$repo_lc/$image"
+            podman manifest create "$full:$TAG"
+            podman manifest add "$full:$TAG" "docker://$full:$TAG-amd64"
+            podman manifest add "$full:$TAG" "docker://$full:$TAG-arm64"
+            podman manifest push --all "$full:$TAG"
+          done
