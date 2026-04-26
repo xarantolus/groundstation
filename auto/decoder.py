@@ -468,7 +468,10 @@ def _cleanup_new(path: str, before: Set[str], protect_shared: bool) -> None:
     after = _snapshot_dir(path)
     new = after - before
     if protect_shared:
-        protected = {os.path.join(path, n) for n in ("recording.bin", "recording.bin.zst", "info.json")}
+        protected = {
+            os.path.join(path, n)
+            for n in ("recording.bin", "recording.bin.zst", "info.json", "doppler.txt")
+        }
         new -= protected
     for p in sorted(new, key=lambda x: -x.count(os.sep)):
         try:

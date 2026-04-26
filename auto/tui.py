@@ -29,6 +29,7 @@ class TUIService:
         self._view = view
         self._refresh = refresh_per_second
         self._stop = asyncio.Event()
+        self._live: Optional[Live] = None
 
     async def run(self) -> None:
         # TUI just reads from the ViewModel — a dedicated subscriber (started
@@ -36,16 +37,34 @@ class TUIService:
         try:
             console = Console()
             renderable = _TUIRenderable(self._view)
-            with Live(renderable, console=console, screen=True, refresh_per_second=self._refresh):
+            self._live = Live(
+                renderable,
+                console=console,
+                screen=True,
+                refresh_per_second=self._refresh,
+            )
+            with self._live:
                 try:
                     await self._stop.wait()
                 except asyncio.CancelledError:
                     pass
         except Exception:
             logger.exception("TUI loop crashed")
+        finally:
+            self._live = None
 
     def stop(self) -> None:
+        # Restore the terminal synchronously here so the screen comes back the
+        # instant Ctrl+C is processed — even if other services need several
+        # seconds to shut down. Live.stop() is idempotent, so the with-block's
+        # __exit__ in run() is a no-op when it eventually fires.
         self._stop.set()
+        live = self._live
+        if live is not None:
+            try:
+                live.stop()
+            except Exception:
+                logger.exception("TUI live.stop failed")
 
 
 class _TUIRenderable:

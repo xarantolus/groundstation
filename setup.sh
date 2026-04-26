@@ -1,38 +1,25 @@
 #!/bin/bash
 #set -eox pipefail
 
-REPO_NAME="xarantolus/groundstation"
-IMAGE_TAG="latest"
-
 if [ -z "$GITHUB_REPOSITORY_OWNER" ]; then
   REPO_URL=$(git config --get remote.origin.url)
-
-  if [[ $REPO_URL =~ github\.com[:/]([^/]+)/([^/]+)(\.git)?/?$ ]]; then
-    REPO_OWNER="$(echo "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')"
-    REPO_NAME_PART="${BASH_REMATCH[2]}"
-    # Remove .git suffix if present
-    REPO_NAME_PART="${REPO_NAME_PART%.git}"
-    REPO_NAME="$REPO_OWNER/$(echo "$REPO_NAME_PART" | tr '[:upper:]' '[:lower:]')"
+  if [[ $REPO_URL =~ github\.com[:/]([^/]+)/([^/]+?)(\.git)?/?$ ]]; then
+    REPO_NAME="$(echo "${BASH_REMATCH[1]}/${BASH_REMATCH[2]}" | tr '[:upper:]' '[:lower:]')"
   else
-    echo "Error: Unable to extract repository information from git URL."
+    echo "Error: Unable to extract repository information from git URL." >&2
     exit 1
   fi
 else
-  # Use GITHUB_REPOSITORY_OWNER in case it's set (e.g., in GitHub Actions)
-  REPO_OWNER="$GITHUB_REPOSITORY_OWNER"
-  REPO_NAME="$REPO_OWNER/$(basename "$(git rev-parse --show-toplevel)" | tr '[:upper:]' '[:lower:]')"
+  REPO_NAME="$(echo "$GITHUB_REPOSITORY_OWNER/$(basename "$(git rev-parse --show-toplevel)")" | tr '[:upper:]' '[:lower:]')"
 fi
 
 IMAGE_TAG="$(git rev-parse --abbrev-ref HEAD | tr '[:upper:]' '[:lower:]' | tr '/' '-')"
-if [ "$IMAGE_TAG" == "HEAD" ] || [ "$IMAGE_TAG" == "main" ] || [ "$IMAGE_TAG" == "master" ]; then
-  IMAGE_TAG="latest"
-fi
+case "$IMAGE_TAG" in HEAD|main|master) IMAGE_TAG="latest" ;; esac
 
 IMAGE_PATH_PREFIX="ghcr.io/$REPO_NAME"
 
 OS=$(uname -s | tr '[:upper:]' '[:lower:]')
 ARCH=$(uname -m)
-
 case "$ARCH" in
     x86_64) ARCH="amd64" ;;
     aarch64) ARCH="arm64" ;;
@@ -44,84 +31,40 @@ esac
 PLATFORM="${PLATFORM:-${OS}/${ARCH}}"
 PUSH_MODE=false
 CONTAINER_TOOL="podman"
+[[ "$*" == *"--push"* ]] && PUSH_MODE=true
+[[ "$*" == *"--docker"* ]] && CONTAINER_TOOL="docker"
 
-if [[ "$*" == *"--push"* ]]; then
-  PUSH_MODE=true
-fi
+build_image() {
+  local name="$1" dockerfile="$2" pull="$3"
+  local image="$IMAGE_PATH_PREFIX/$name:$IMAGE_TAG"
+  local cache="$IMAGE_PATH_PREFIX/$name-cache"
+  local cache_args=()
 
-if [[ "$*" == *"--docker"* ]]; then
-  CONTAINER_TOOL="docker"
-fi
+  if [ "$CONTAINER_TOOL" = "docker" ]; then
+    cache_args+=(--cache-from="type=registry,ref=$cache")
+    [ "$PUSH_MODE" = true ] && cache_args+=(--cache-to="type=registry,ref=$cache,mode=max")
+  else
+    cache_args+=(--layers --cache-from="$cache")
+    [ "$PUSH_MODE" = true ] && cache_args+=(--cache-to="$cache")
+  fi
 
-# Build groundstation
-BUILD_ARGS="--pull=newer --platform $PLATFORM -t $IMAGE_PATH_PREFIX/gs:$IMAGE_TAG --build-arg TAG=$IMAGE_TAG --build-arg GITHUB_REPOSITORY=$REPO_NAME"
-if [ "$PUSH_MODE" = true ]; then
-  BUILD_ARGS="$BUILD_ARGS --cache-from=$IMAGE_PATH_PREFIX/gs-cache --cache-to=$IMAGE_PATH_PREFIX/gs-cache"
-else
-  BUILD_ARGS="$BUILD_ARGS"
-fi
-$CONTAINER_TOOL build $BUILD_ARGS -f Dockerfile .
-if [ "$PUSH_MODE" = true ]; then
-  $CONTAINER_TOOL push "$IMAGE_PATH_PREFIX/gs:$IMAGE_TAG"
-fi
+  $CONTAINER_TOOL build \
+    --pull="$pull" \
+    --platform "$PLATFORM" \
+    -t "$image" \
+    --build-arg TAG="$IMAGE_TAG" \
+    --build-arg GITHUB_REPOSITORY="$REPO_NAME" \
+    "${cache_args[@]}" \
+    -f "$dockerfile" .
 
-# Build satellite-recorder
-BUILD_ARGS="--pull=never --platform $PLATFORM -t $IMAGE_PATH_PREFIX/satellite-recorder:$IMAGE_TAG --build-arg TAG=$IMAGE_TAG --build-arg GITHUB_REPOSITORY=$REPO_NAME"
-if [ "$PUSH_MODE" = true ]; then
-  BUILD_ARGS="$BUILD_ARGS --cache-from=$IMAGE_PATH_PREFIX/satellite-recorder-cache --cache-to=$IMAGE_PATH_PREFIX/satellite-recorder-cache"
-else
-  BUILD_ARGS="$BUILD_ARGS"
-fi
-$CONTAINER_TOOL build $BUILD_ARGS -f Dockerfile.recorder .
-if [ "$PUSH_MODE" = true ]; then
-  $CONTAINER_TOOL push "$IMAGE_PATH_PREFIX/satellite-recorder:$IMAGE_TAG"
-fi
+  [ "$PUSH_MODE" = true ] && $CONTAINER_TOOL push "$image"
+}
 
-# Decoders
-cd decoders
+build_image gs Dockerfile newer
+build_image satellite-recorder Dockerfile.recorder never
 
-# Build ax100 decoder
-cd ax100
-BUILD_ARGS="--pull=never --platform $PLATFORM -t $IMAGE_PATH_PREFIX/ax100-decoder:$IMAGE_TAG --build-arg TAG=$IMAGE_TAG --build-arg GITHUB_REPOSITORY=$REPO_NAME"
-if [ "$PUSH_MODE" = true ]; then
-  BUILD_ARGS="$BUILD_ARGS --cache-from=$IMAGE_PATH_PREFIX/ax100-decoder-cache --cache-to=$IMAGE_PATH_PREFIX/ax100-decoder-cache"
-else
-  BUILD_ARGS="$BUILD_ARGS"
-fi
-$CONTAINER_TOOL build $BUILD_ARGS -f Dockerfile .
-cd ..
-if [ "$PUSH_MODE" = true ]; then
-  $CONTAINER_TOOL push "$IMAGE_PATH_PREFIX/ax100-decoder:$IMAGE_TAG"
-fi
-
-# Build waterfall
-cd waterfall
-BUILD_ARGS="--pull=missing --platform $PLATFORM -t $IMAGE_PATH_PREFIX/waterfall:$IMAGE_TAG --build-arg TAG=$IMAGE_TAG --build-arg GITHUB_REPOSITORY=$REPO_NAME"
-if [ "$PUSH_MODE" = true ]; then
-  BUILD_ARGS="$BUILD_ARGS --cache-from=$IMAGE_PATH_PREFIX/waterfall-cache --cache-to=$IMAGE_PATH_PREFIX/waterfall-cache"
-else
-  BUILD_ARGS="$BUILD_ARGS"
-fi
-$CONTAINER_TOOL build $BUILD_ARGS -f Dockerfile .
-if [ "$PUSH_MODE" = true ]; then
-  $CONTAINER_TOOL push "$IMAGE_PATH_PREFIX/waterfall:$IMAGE_TAG"
-fi
-cd ..
-
-# Build satdump decoder
-cd satdump
-BUILD_ARGS="--pull=missing --platform $PLATFORM -t $IMAGE_PATH_PREFIX/satdump-decoder:$IMAGE_TAG --build-arg TAG=$IMAGE_TAG --build-arg GITHUB_REPOSITORY=$REPO_NAME"
-if [ "$PUSH_MODE" = true ]; then
-  BUILD_ARGS="$BUILD_ARGS --cache-from=$IMAGE_PATH_PREFIX/satdump-decoder-cache --cache-to=$IMAGE_PATH_PREFIX/satdump-decoder-cache"
-else
-  BUILD_ARGS="$BUILD_ARGS"
-fi
-$CONTAINER_TOOL build $BUILD_ARGS -f Dockerfile .
-cd ..
-if [ "$PUSH_MODE" = true ]; then
-  $CONTAINER_TOOL push "$IMAGE_PATH_PREFIX/satdump-decoder:$IMAGE_TAG"
-fi
-
-cd .. # leave decoders
+(cd decoders/ax100 && build_image ax100-decoder Dockerfile never)
+(cd decoders/waterfall && build_image waterfall Dockerfile missing)
+(cd decoders/satdump && build_image satdump-decoder Dockerfile missing)
 
 uv sync
