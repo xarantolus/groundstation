@@ -61,7 +61,7 @@ satellites:
   - name: AISTECHSAT-2
     norad: 43768
     frequency: 436.730e6
-    bandwidth: 384e3
+    bandwidth: 128e3
     gain: 60
     sample_rate: 384e3
     lo_offset: 100e3
@@ -78,7 +78,7 @@ satellites:
   - name: CATSAT
     norad: 60246
     frequency: 437.185e6
-    bandwidth: 384e3
+    bandwidth: 128e3
     gain: 60
     sample_rate: 384e3
     lo_offset: 100e3
@@ -93,7 +93,7 @@ satellites:
   - name: INNOCUBE
     norad: 62616
     frequency: 435.950e6
-    bandwidth: 384e3
+    bandwidth: 128e3
     gain: 60
     sample_rate: 384e3
     lo_offset: 100e3
@@ -108,7 +108,7 @@ satellites:
   - name: K-HERO
     norad: 66660
     frequency: 437.180e6
-    bandwidth: 384e3
+    bandwidth: 128e3
     gain: 60
     sample_rate: 384e3
     lo_offset: 100e3
@@ -123,7 +123,7 @@ satellites:
   - name: Luojia-1
     norad: 43485
     frequency: 437.250e6
-    bandwidth: 384e3
+    bandwidth: 128e3
     gain: 60
     sample_rate: 384e3
     lo_offset: 100e3
@@ -139,7 +139,7 @@ satellites:
   - name: MIMAN
     norad: 52900
     frequency: 436.500e6
-    bandwidth: 384e3
+    bandwidth: 128e3
     gain: 60
     sample_rate: 384e3
     lo_offset: 100e3
@@ -154,7 +154,7 @@ satellites:
   - name: NUSHSAT-1
     norad: 63211
     frequency: 436.200e6
-    bandwidth: 384e3
+    bandwidth: 128e3
     gain: 60
     sample_rate: 384e3
     lo_offset: 100e3
@@ -170,7 +170,7 @@ satellites:
   - name: SNIPE-1
     norad: 56749
     frequency: 435.450e6
-    bandwidth: 384e3
+    bandwidth: 128e3
     gain: 60
     sample_rate: 384e3
     lo_offset: 100e3
@@ -186,7 +186,7 @@ satellites:
   - name: SNIPE-2
     norad: 56745
     frequency: 436.000e6
-    bandwidth: 384e3
+    bandwidth: 128e3
     gain: 60
     sample_rate: 384e3
     lo_offset: 100e3
@@ -202,7 +202,7 @@ satellites:
   - name: SNIPE-4
     norad: 56744
     frequency: 437.800e6
-    bandwidth: 384e3
+    bandwidth: 128e3
     gain: 60
     sample_rate: 384e3
     lo_offset: 100e3
@@ -218,7 +218,7 @@ satellites:
   - name: Suomi 100
     norad: 43804
     frequency: 437.775e6
-    bandwidth: 384e3
+    bandwidth: 128e3
     gain: 60
     sample_rate: 384e3
     lo_offset: 100e3
@@ -233,7 +233,7 @@ satellites:
   - name: UND ROADS 1
     norad: 64535
     frequency: 435.400e6
-    bandwidth: 384e3
+    bandwidth: 128e3
     gain: 60
     sample_rate: 384e3
     lo_offset: 100e3
@@ -248,7 +248,7 @@ satellites:
   - name: UND ROADS 2
     norad: 64549
     frequency: 435.400e6
-    bandwidth: 384e3
+    bandwidth: 128e3
     gain: 60
     sample_rate: 384e3
     lo_offset: 100e3
@@ -263,7 +263,7 @@ satellites:
   - name: BEE-1000
     norad: 66650
     frequency: 436.500e6
-    bandwidth: 384e3
+    bandwidth: 128e3
     gain: 60
     sample_rate: 384e3
     lo_offset: 100e3
@@ -280,7 +280,7 @@ satellites:
   - name: StratoSat-TK1
     norad: 57167
     frequency: 435.870e6
-    bandwidth: 384e3
+    bandwidth: 128e3
     gain: 40
     sample_rate: 384e3
     lo_offset: 100e3
@@ -295,7 +295,7 @@ satellites:
   - name: SAKHACUBE-CHOLBON
     norad: 67290
     frequency: 437.350e6
-    bandwidth: 384e3
+    bandwidth: 128e3
     sample_rate: 384e3
     lo_offset: 100e3
     priority: 2
@@ -310,7 +310,7 @@ satellites:
   - name: Lobachevsky
     norad: 67284
     frequency: 436.320e6
-    bandwidth: 384e3
+    bandwidth: 128e3
     sample_rate: 384e3
     lo_offset: 100e3
     priority: 2
