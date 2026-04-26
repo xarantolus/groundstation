@@ -231,12 +231,15 @@ def prioritize(
 
         ranked = sorted(cluster, key=lambda t: _pass_score(*t), reverse=True)
         best_sat, best_pi = ranked[0]
-        considered = ", ".join(t[0].name for t in cluster)
+        considered = ", ".join(
+            f"{s.name}@{p.max_elevation:.0f}°" for s, p in cluster
+        )
         logger.info(
-            "overlap: %d passes (%s), selected %s",
+            "overlap: %d passes (%s), selected %s@%.0f°",
             len(cluster),
             considered,
             best_sat.name,
+            best_pi.max_elevation,
         )
         picked.append((best_sat, best_pi))
         occupied: List[Tuple[datetime.datetime, datetime.datetime]] = [
