@@ -84,7 +84,12 @@ class RecorderService:
     async def _record(self, p: Pass) -> None:
         os.makedirs(p.pass_dir, exist_ok=True)
         self._write_info_json(p)
-        self._write_doppler_file(p)
+        try:
+            self._write_doppler_file(p)
+        except Exception as e:
+            logger.exception("could not write doppler file for %s", p.id)
+            await self._fail(p, f"doppler file generation failed: {e}")
+            return
 
         p.status = PassStatus.RECORDING
         self._state.save_pass(p)
@@ -167,21 +172,18 @@ class RecorderService:
         end = p.pass_info.end_time + datetime.timedelta(
             seconds=RECORDING_TRAIL_SECONDS + buffer_s
         )
-        try:
-            write_doppler_file(
-                tle1=p.pass_info.tle1,
-                tle2=p.pass_info.tle2,
-                sat_name=p.satellite.name,
-                lat=self._cfg.location_lat,
-                lon=self._cfg.location_lon,
-                alt_m=self._cfg.location_alt,
-                f_carrier=p.satellite.frequency,
-                start=start,
-                end=end,
-                output_path=path,
-            )
-        except Exception:
-            logger.exception("could not write doppler file for %s", p.id)
+        write_doppler_file(
+            tle1=p.pass_info.tle1,
+            tle2=p.pass_info.tle2,
+            sat_name=p.satellite.name,
+            lat=self._cfg.location_lat,
+            lon=self._cfg.location_lon,
+            alt_m=self._cfg.location_alt,
+            f_carrier=p.satellite.frequency,
+            start=start,
+            end=end,
+            output_path=path,
+        )
 
     def _write_info_json(self, p: Pass, extra: Optional[dict] = None) -> None:
         data = {
