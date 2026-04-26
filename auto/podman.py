@@ -477,6 +477,15 @@ def filter_decoder_outputs(
     files: List[str] = list(iter_outputs())
 
     if len(files) < decoder.min_files:
+        action = "discarding output dir" if not shared else "discarding outputs"
+        logger.info(
+            "%s '%s' produced %d file(s), needs >= %d (decoder.min_files); %s",
+            decoder.name or "decoder",
+            output_dir,
+            len(files),
+            decoder.min_files,
+            action,
+        )
         if not shared:
             import shutil
 

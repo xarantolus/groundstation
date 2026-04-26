@@ -351,11 +351,21 @@ class DecoderService:
             p.decoders_failed.append(decoder_index)
             self._state.save_pass(p)
             self._state.decode_tombstone(pass_id, decoder_index)
+            constraints = []
+            if decoder.min_files:
+                constraints.append(f"min_files={decoder.min_files}")
+            if decoder.min_size_bytes:
+                constraints.append(f"min_size_bytes={decoder.min_size_bytes}")
+            constraint_str = ", ".join(constraints) or "min_files/min_size_bytes"
+            error = (
+                f"decoder produced no surviving output (filters: {constraint_str}); "
+                "see groundstation.podman log for per-file details"
+            )
             await self._bus.publish(
                 E.DecodeFailed(
                     pass_id=pass_id,
                     decoder_index=decoder_index,
-                    error="decoder output below min_files/min_size_bytes",
+                    error=error,
                 )
             )
         else:
