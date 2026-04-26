@@ -39,7 +39,11 @@ class RecorderService:
         self._bus = bus
         self._state = state
         self._stop = asyncio.Event()
+        # Most recently scheduled recording task. Each new task chains itself
+        # behind the previous so back-to-back partial-window passes serialise
+        # cleanly without dropping events on the floor.
         self._active: Optional[asyncio.Task] = None
+        self._tasks: set[asyncio.Task] = set()
         self._sub = None
 
     async def run(self) -> None:
@@ -49,37 +53,46 @@ class RecorderService:
                 if self._stop.is_set():
                     break
                 try:
-                    await self._handle_pass_started(event)  # type: ignore[arg-type]
+                    self._handle_pass_started(event)  # type: ignore[arg-type]
                 except Exception:
                     logger.exception("recorder failed handling PassStarted")
         finally:
             self._sub.close()
-            if self._active and not self._active.done():
-                self._active.cancel()
+            for t in list(self._tasks):
+                if not t.done():
+                    t.cancel()
+            for t in list(self._tasks):
                 try:
-                    await self._active
-                except asyncio.CancelledError:
+                    await t
+                except (asyncio.CancelledError, Exception):
                     pass
 
     def stop(self) -> None:
         self._stop.set()
         if self._sub is not None:
             self._sub.close()
-        if self._active and not self._active.done():
-            self._active.cancel()
+        for t in list(self._tasks):
+            if not t.done():
+                t.cancel()
 
-    async def _handle_pass_started(self, event: E.PassStarted) -> None:
+    def _handle_pass_started(self, event: E.PassStarted) -> None:
         p = event.pass_
-        if self._active and not self._active.done():
-            logger.warning(
-                "recorder busy — skipping %s (overlap with previous pass)", p.id
-            )
-            return
-        self._active = asyncio.create_task(self._record(p))
-        try:
-            await self._active
-        finally:
-            self._active = None
+        prev = self._active
+        task = asyncio.create_task(self._chain_record(p, prev))
+        self._active = task
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _chain_record(self, p: Pass, prev: Optional[asyncio.Task]) -> None:
+        # Wait for the previous recording to finish so SDR/podman teardown
+        # completes before we retune. _record's own late-start guard handles
+        # the case where waiting pushed us past the new pass's window.
+        if prev is not None and not prev.done():
+            try:
+                await prev
+            except (asyncio.CancelledError, Exception):
+                pass
+        await self._record(p)
 
     async def _record(self, p: Pass) -> None:
         os.makedirs(p.pass_dir, exist_ok=True)

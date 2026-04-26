@@ -5,7 +5,7 @@ import collections
 import logging
 import os
 import uuid
-from typing import Deque, Dict, List, Optional, Set, Tuple
+from typing import Deque, Dict, Optional, Set, Tuple
 
 from . import events as E
 from .bus import EventBus, run_subscriber
@@ -13,7 +13,7 @@ from .decode_gate import DecodeGate
 from .models import GroundstationConfig, IQ_DATA_FILE_EXTENSION, Pass, PassStatus, TransferRequest
 from .podman import DECODER_KILLED_BY_STOP, DEFAULT_DECODER_TIMEOUT_MINUTES, filter_decoder_outputs, run_decoder
 from .state import StateStore
-from .transfer import compress_file
+from .transfer import CompressionInterrupted, compress_file
 
 logger = logging.getLogger("groundstation.decoder")
 _decoder_output_logger = logging.getLogger("groundstation.decoders.output")
@@ -112,7 +112,7 @@ class DecoderService:
                         continue
                     wakeup_task = asyncio.create_task(self._wakeup.wait())
                     stop_task = asyncio.create_task(self._stop.wait())
-                    done, pending = await asyncio.wait(
+                    _, pending = await asyncio.wait(
                         {wakeup_task, stop_task}, return_when=asyncio.FIRST_COMPLETED
                     )
                     for t in pending:
@@ -419,11 +419,28 @@ class DecoderService:
                 except OSError:
                     logger.exception("could not remove IQ %s", iq)
             else:
-                try:
-                    async with self._gate.cpu_slot(
-                        min_safety_minutes=COMPRESSION_START_SAFETY_MINUTES
-                    ) as kill_event:
-                        compressed = await compress_file(iq, stop_event=kill_event)
+                compressed: Optional[str] = None
+                while not self._stop.is_set():
+                    try:
+                        async with self._gate.cpu_slot(
+                            min_safety_minutes=COMPRESSION_START_SAFETY_MINUTES
+                        ) as kill_event:
+                            compressed = await compress_file(iq, stop_event=kill_event)
+                        break
+                    except CompressionInterrupted:
+                        logger.info(
+                            "IQ compression for %s killed by gate — retrying after next safe window",
+                            p.id,
+                        )
+                        continue
+                    except Exception:
+                        logger.exception(
+                            "IQ compression failed for %s — leaving %s for 24h cleanup",
+                            p.id,
+                            iq,
+                        )
+                        break
+                if compressed is not None:
                     try:
                         os.remove(iq)
                         logger.info(
@@ -442,12 +459,6 @@ class DecoderService:
                     )
                     self._state.transfer_put(req)
                     await self._bus.publish(E.TransferQueued(request=req))
-                except Exception:
-                    logger.exception(
-                        "IQ compression failed for %s — leaving %s for 24h cleanup",
-                        p.id,
-                        iq,
-                    )
 
         p.status = PassStatus.DONE if p.decoders_done else PassStatus.FAILED
         self._state.save_pass(p)

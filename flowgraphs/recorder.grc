@@ -12,7 +12,7 @@ options:
     generate_options: no_gui
     hier_block_src_path: '.:'
     id: recorder
-    max_nouts: '0'
+    max_nouts: 32 * 1024 * 1024
     output_language: python
     placement: (0,0)
     qt_qss_theme: ''
@@ -634,7 +634,7 @@ blocks:
     bus_sink: false
     bus_source: false
     bus_structure: null
-    coordinate: [24, 140.0]
+    coordinate: [24, 212.0]
     rotation: 0
     state: enabled
 - name: satellites_doppler_correction_0

@@ -95,6 +95,7 @@ async def test_gate_replaces_timer_when_closer_pass_arrives():
     g.on_next_pass(clock.t + datetime.timedelta(hours=2), clock.t + datetime.timedelta(hours=2, minutes=8))
     assert g.is_open()
     first_timer = g._timer
+    assert first_timer is not None
     g.on_next_pass(clock.t + datetime.timedelta(minutes=5), clock.t + datetime.timedelta(minutes=13))
     assert not g.is_open()
     assert first_timer is not g._timer
