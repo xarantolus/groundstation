@@ -241,7 +241,10 @@ class SchedulerService:
                     )
                 )
 
-            record_at = p.pass_info.start_time - datetime.timedelta(seconds=RECORDING_LEAD_SECONDS)
+            if p.pass_info.recording_start_override is not None:
+                record_at = p.pass_info.recording_start_override
+            else:
+                record_at = p.pass_info.start_time - datetime.timedelta(seconds=RECORDING_LEAD_SECONDS)
             now = datetime.datetime.now()
             delay = (record_at - now).total_seconds()
             if delay > 0:

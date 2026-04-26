@@ -101,7 +101,10 @@ class RecorderService:
             )
 
         now = datetime.datetime.now()
-        record_until = p.pass_info.end_time + datetime.timedelta(seconds=RECORDING_TRAIL_SECONDS)
+        if p.pass_info.recording_end_override is not None:
+            record_until = p.pass_info.recording_end_override
+        else:
+            record_until = p.pass_info.end_time + datetime.timedelta(seconds=RECORDING_TRAIL_SECONDS)
         record_minutes = (record_until - now).total_seconds() / 60
         if record_minutes < 0.5:
             await self._fail(p, "pass already ended at start")

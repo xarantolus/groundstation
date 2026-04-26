@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import datetime
 from enum import Enum
-from typing import Any, List
+from typing import Any, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -76,6 +76,8 @@ class PassInfo(BaseModel):
     duration_minutes: float
     tle1: str
     tle2: str
+    recording_start_override: Optional[datetime.datetime] = None
+    recording_end_override: Optional[datetime.datetime] = None
 
 
 class PassStatus(str, Enum):
