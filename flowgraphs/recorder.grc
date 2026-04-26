@@ -170,10 +170,10 @@ blocks:
       \        output_items[0][:n] = input_items[0][:n]\n        if n > 0:\n     \
       \       now = time.time()\n            if now - self._last_tag_time >= self._interval:\n\
       \                full = int(now)\n                frac = now - full\n      \
-      \          self.add_item_tag(\n                    0,\n                    self.nitems_written(0),\n\
-      \                    pmt.intern(\"rx_time\"),\n                    pmt.make_tuple(pmt.from_uint64(full),\
-      \ pmt.from_double(frac)),\n                )\n                self._last_tag_time\
-      \ = now\n        return n\n"
+      \          self.add_item_tag(\n                    0,\n                    self.nitems_written(0)\
+      \ + n - 1,\n                    pmt.intern(\"rx_time\"),\n                 \
+      \   pmt.make_tuple(pmt.from_uint64(full), pmt.from_double(frac)),\n        \
+      \        )\n                self._last_tag_time = now\n        return n\n"
     affinity: ''
     alias: ''
     comment: ''
