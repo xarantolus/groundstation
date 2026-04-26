@@ -71,5 +71,3 @@ build_image satellite-recorder Dockerfile.recorder never
 (cd decoders/ax100 && build_image ax100-decoder Dockerfile never)
 (cd decoders/waterfall && build_image waterfall Dockerfile missing)
 (cd decoders/satdump && build_image satdump-decoder Dockerfile missing)
-
-uv sync
