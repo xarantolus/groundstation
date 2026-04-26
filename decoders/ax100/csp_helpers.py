@@ -101,3 +101,22 @@ def verify_crc_data_only(payload_with_crc: bytes) -> bool:
         return False
     expected = struct.unpack(">I", payload_with_crc[-4:])[0]
     return crc32c_fn(payload_with_crc[:-4]) == expected
+
+
+def verify_double_crc(header: bytes, payload_with_two_crcs: bytes) -> bool:
+    """Some AX100 firmware (e.g. MIMAN) appends *two* CRC32-C trailers:
+    first ``csp_crc32_append(packet, false)`` (over payload only), then
+    ``csp_crc32_append(packet, true)`` (over header + payload + inner CRC).
+    The wire layout becomes ``[hdr][payload][inner_crc][outer_crc]``.
+
+    Returns True when both CRCs are present and consistent — the input is
+    everything after the header, including the two 4-byte trailers."""
+    if len(payload_with_two_crcs) < 8:
+        return False
+    inner = struct.unpack(">I", payload_with_two_crcs[-8:-4])[0]
+    outer = struct.unpack(">I", payload_with_two_crcs[-4:])[0]
+    if crc32c_fn(payload_with_two_crcs[:-8]) != inner:
+        return False
+    if crc32c_fn(header + payload_with_two_crcs[:-4]) != outer:
+        return False
+    return True

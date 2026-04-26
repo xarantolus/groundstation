@@ -5,6 +5,7 @@ from csp_helpers import (
     has_crc,
     parse_header,
     verify_crc_data_only,
+    verify_double_crc,
 )
 
 
@@ -40,6 +41,7 @@ def scan_packets(raw: bytes, max_payload: int, filter_src: int | None,
                     "header_raw": hdr_bytes,
                     "payload": actual_payload,
                     "crc_ok": True,
+                    "crc_mode": "data-only",
                     "total_len": total,
                 })
                 offset = end
@@ -106,19 +108,33 @@ def parse_kiss_frames(raw: bytes, filter_src: int | None,
         if filter_dst is not None and hdr["dst"] != filter_dst:
             continue
 
+        crc_mode: str | None = None
         if has_crc(hdr["flags"]):
             payload_with_crc = body[4:]
             if len(payload_with_crc) < 4:
                 # Header says CRC is appended but the frame is too short to
                 # contain one. Surface the packet anyway with crc_ok=False.
                 crc_ok = False
+                crc_mode = "truncated"
                 payload = payload_with_crc
+            elif verify_crc_data_only(payload_with_crc):
+                # Standard CSP 1.x layout: [payload][crc].
+                crc_ok = True
+                crc_mode = "data-only"
+                payload = payload_with_crc[:-4]
+            elif verify_double_crc(hdr_bytes, payload_with_crc):
+                # MIMAN-style double trailer: [payload][crc_data][crc_hdr+data+crc_data].
+                # Strip both 4-byte CRCs from the payload we surface.
+                crc_ok = True
+                crc_mode = "double (data + header+data+crc)"
+                payload = payload_with_crc[:-8]
             else:
-                # libcsp 1.6 (CSP 1.x): CRC32-C is over the payload only.
-                crc_ok = verify_crc_data_only(payload_with_crc)
+                crc_ok = False
+                crc_mode = "data-only (no match)"
                 payload = payload_with_crc[:-4]
         else:
             crc_ok = None
+            crc_mode = "none (FCRC32 flag clear)"
             payload = body[4:]
 
         results.append({
@@ -127,6 +143,7 @@ def parse_kiss_frames(raw: bytes, filter_src: int | None,
             "header_raw": hdr_bytes,
             "payload": payload,
             "crc_ok": crc_ok,
+            "crc_mode": crc_mode,
             "total_len": end - start + 1,
         })
     return results
@@ -156,6 +173,7 @@ def parse_packets_no_crc(raw: bytes, filter_src: int | None,
         "header_raw": hdr_bytes,
         "payload": raw[4:],
         "crc_ok": None,
+        "crc_mode": "skipped (--no-crc)",
         "total_len": len(raw),
     }]
 
@@ -168,10 +186,13 @@ def print_packet(i: int, pkt: dict, file=sys.stderr):
     print(f"  prio={h['prio']} src={h['src']} dst={h['dst']} "
           f"dport={h['dport']} sport={h['sport']} "
           f"flags=0x{h['flags']:02x} [{h['flags_str']}]", file=file)
+    mode = pkt.get("crc_mode")
     if pkt["crc_ok"] is None:
-        print(f"  CRC    : (not checked)", file=file)
+        print(f"  CRC    : {mode or 'n/a'}", file=file)
     else:
-        print(f"  CRC    : {'OK' if pkt['crc_ok'] else 'FAIL'}", file=file)
+        verdict = "OK" if pkt["crc_ok"] else "FAIL"
+        suffix = f"  [{mode}]" if mode else ""
+        print(f"  CRC    : {verdict}{suffix}", file=file)
     print(f"  Payload: {len(payload)} bytes", file=file)
 
     try:
