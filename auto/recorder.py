@@ -181,11 +181,14 @@ class RecorderService:
         await self._bus.publish(E.RecordingFailed(pass_id=p.id, error=reason))
 
     def _write_doppler_file(self, p: Pass) -> None:
-        # Read by gr-satellites doppler_correction block as /data/doppler.txt.
-        # 60s buffer beyond the recording window so the block has interpolation
-        # samples on both sides of every captured IQ sample.
+        # Doppler timestamps are seconds-relative to `anchor` (≈ now), so the
+        # same file works during a later replay of recording.bin: the doppler
+        # block's sample-count timeline starts at 0 in both cases. Skew between
+        # this `now` and when the recorder actually opens the SDR is ~1-2s
+        # which is irrelevant given how smooth LEO doppler curves are.
         path = os.path.join(p.pass_dir, "doppler.txt")
         buffer_s = 60
+        anchor = datetime.datetime.now()
         start = p.pass_info.start_time - datetime.timedelta(
             seconds=RECORDING_LEAD_SECONDS + buffer_s
         )
@@ -193,7 +196,9 @@ class RecorderService:
             seconds=RECORDING_TRAIL_SECONDS + buffer_s
         )
         if not p.satellite.doppler_correction:
-            write_zero_doppler_file(output_path=path, start=start, end=end)
+            write_zero_doppler_file(
+                output_path=path, anchor=anchor, start=start, end=end
+            )
             # Also keep the predicted doppler track for reference / offline
             # post-processing, under a different filename so the flowgraph
             # still picks up the zero stub.
@@ -205,6 +210,7 @@ class RecorderService:
                 lon=self._cfg.location_lon,
                 alt_m=self._cfg.location_alt,
                 f_carrier=p.satellite.frequency,
+                anchor=anchor,
                 start=start,
                 end=end,
                 output_path=os.path.join(p.pass_dir, "doppler_reference.txt"),
@@ -218,6 +224,7 @@ class RecorderService:
             lon=self._cfg.location_lon,
             alt_m=self._cfg.location_alt,
             f_carrier=p.satellite.frequency,
+            anchor=anchor,
             start=start,
             end=end,
             output_path=path,
