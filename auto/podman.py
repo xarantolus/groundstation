@@ -272,6 +272,8 @@ async def run_recorder(
     ]
     if sat.gain is not None:
         envs.append(f"GAIN={sat.gain}")
+    if sat.doppler_correction:
+        envs.append("CORRECT_DOPPLER=1")
     cmd: List[str] = [
         "podman",
         "run",

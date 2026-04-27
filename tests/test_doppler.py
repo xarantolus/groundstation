@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from auto.doppler import write_doppler_file
+from auto.doppler import write_doppler_file, write_zero_doppler_file
 
 
 # Classic ISS TLE used in the Vallado/SGP4 reference papers — checksums are
@@ -88,6 +88,31 @@ def test_write_doppler_file_atomic_replace(tmp_path):
     assert "STALE" not in text
     assert "\t" in text
     assert not (tmp_path / "doppler.txt.tmp").exists()
+
+
+def test_write_zero_doppler_file(tmp_path):
+    out = tmp_path / "doppler.txt"
+    start = datetime.datetime(2024, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+    end = start + datetime.timedelta(minutes=15)
+
+    write_zero_doppler_file(output_path=str(out), start=start, end=end)
+
+    lines = out.read_text(encoding="utf-8").strip().split("\n")
+    assert len(lines) == 2
+    for line in lines:
+        ts_str, freq_str = line.split("\t")
+        float(ts_str)  # parses as float
+        assert float(freq_str) == 0.0
+    assert float(lines[0].split("\t")[0]) == pytest.approx(start.timestamp(), abs=1e-3)
+    assert float(lines[-1].split("\t")[0]) == pytest.approx(end.timestamp(), abs=1e-3)
+
+
+def test_write_zero_doppler_file_rejects_bad_window(tmp_path):
+    out = tmp_path / "doppler.txt"
+    t = datetime.datetime(2024, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
+    with pytest.raises(ValueError):
+        write_zero_doppler_file(output_path=str(out), start=t, end=t)
+    assert not out.exists()
 
 
 def test_write_doppler_file_rejects_bad_window(tmp_path):

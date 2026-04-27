@@ -47,6 +47,7 @@ class Satellite(BaseModel):
     gain: int | None = None
     priority: int = 0
     iq_upload: IQUploadMode = "on_decode"
+    doppler_correction: bool = True
     decoder: List[Decoder] = Field(default_factory=list)
 
     @field_validator("norad", mode="before")

@@ -99,3 +99,45 @@ def write_doppler_file(
         f_carrier / 1e6,
     )
     return written
+
+
+def write_zero_doppler_file(
+    *,
+    output_path: str,
+    start: datetime.datetime,
+    end: datetime.datetime,
+) -> None:
+    """Write a stub doppler file that applies zero correction.
+
+    The gr-satellites doppler_correction block hard-requires the file to
+    exist and be parseable, but linearly interpolates between entries — so
+    two zero-frequency bookends spanning the recording window keep the
+    correction at exactly 0 Hz throughout.
+    """
+    if end <= start:
+        raise ValueError("doppler end must be after start")
+
+    if start.tzinfo is None:
+        start_utc = start.astimezone().astimezone(datetime.timezone.utc)
+    else:
+        start_utc = start.astimezone(datetime.timezone.utc)
+    if end.tzinfo is None:
+        end_utc = end.astimezone().astimezone(datetime.timezone.utc)
+    else:
+        end_utc = end.astimezone(datetime.timezone.utc)
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    tmp_path = output_path + ".tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            f.write(f"{start_utc.timestamp()}\t0\n")
+            f.write(f"{end_utc.timestamp()}\t0\n")
+        os.replace(tmp_path, output_path)
+    except Exception:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
+
+    logger.info("wrote zero-doppler stub %s", output_path)

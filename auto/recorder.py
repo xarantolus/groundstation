@@ -10,7 +10,7 @@ from typing import Optional
 
 from . import events as E
 from .bus import EventBus, run_subscriber
-from .doppler import write_doppler_file
+from .doppler import write_doppler_file, write_zero_doppler_file
 from .models import GroundstationConfig, Pass, PassStatus, TransferRequest
 from .podman import run_recorder
 from .scheduler import RECORDING_LEAD_SECONDS
@@ -153,7 +153,12 @@ class RecorderService:
         await self._bus.publish(E.RecordingCompleted(pass_id=p.id, path=path))
 
         # IQ upload happens post-decode in DecoderService._after_all_decoders.
-        for name, label in (("info.json", "info"), ("doppler.txt", "doppler")):
+        uploads = [("info.json", "info")]
+        if p.satellite.doppler_correction:
+            uploads.append(("doppler.txt", "doppler"))
+        else:
+            uploads.append(("doppler_reference.txt", "doppler reference"))
+        for name, label in uploads:
             path = os.path.join(p.pass_dir, name)
             if not os.path.isfile(path):
                 continue
@@ -187,6 +192,24 @@ class RecorderService:
         end = p.pass_info.end_time + datetime.timedelta(
             seconds=RECORDING_TRAIL_SECONDS + buffer_s
         )
+        if not p.satellite.doppler_correction:
+            write_zero_doppler_file(output_path=path, start=start, end=end)
+            # Also keep the predicted doppler track for reference / offline
+            # post-processing, under a different filename so the flowgraph
+            # still picks up the zero stub.
+            write_doppler_file(
+                tle1=p.pass_info.tle1,
+                tle2=p.pass_info.tle2,
+                sat_name=p.satellite.name,
+                lat=self._cfg.location_lat,
+                lon=self._cfg.location_lon,
+                alt_m=self._cfg.location_alt,
+                f_carrier=p.satellite.frequency,
+                start=start,
+                end=end,
+                output_path=os.path.join(p.pass_dir, "doppler_reference.txt"),
+            )
+            return
         write_doppler_file(
             tle1=p.pass_info.tle1,
             tle2=p.pass_info.tle2,
