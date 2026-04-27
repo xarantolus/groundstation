@@ -177,7 +177,7 @@ blocks:
     alias: ''
     comment: Output is shifted signal at samp_rate
     enabled: 'True'
-    input_index: 0 if lo_offset else 1
+    input_index: 0 if correct_doppler else 1
     maxoutbuf: '0'
     minoutbuf: '0'
     num_inputs: '2'
