@@ -7,6 +7,10 @@ FROM debian:${DEBIAN_IMAGE_TAG} AS builder
 ARG DEBIAN_FRONTEND=noninteractive
 ARG CMAKE_BUILD_PARALLEL_LEVEL=""
 ENV TZ=Etc/UTC
+# SatDump's CMakeLists adds -march=native unless ENV{CI} is defined; the GH
+# arm64 runners (Cobalt/Neoverse, SVE2) would then bake in instructions the
+# Pi 5 (Cortex-A76, no SVE) can't run — SIGILL at startup.
+ENV CI=true
 
 WORKDIR /usr/local/src/
 

@@ -10,19 +10,19 @@ satellites:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: lrpt
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
-        args: --satellite_number M2-3 --fill_missing
+        args: --satellite_number=M2-3 --fill_missing
         env:
           PIPELINE_NAME: meteor_m2_lrpt
         min_files: 6
       - name: x_lrpt
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
-        args: --satellite_number M2-3 --fill_missing
+        args: --satellite_number=M2-3 --fill_missing
         env:
           PIPELINE_NAME: meteor_m2-x_lrpt
         min_files: 6
       - name: x_lrpt_80k
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
-        args: --satellite_number M2-3 --fill_missing
+        args: --satellite_number=M2-3 --fill_missing
         env:
           PIPELINE_NAME: meteor_m2-x_lrpt_80k
         min_files: 6
@@ -40,19 +40,19 @@ satellites:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: lrpt
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
-        args: --satellite_number M2-4 --fill_missing
+        args: --satellite_number=M2-4 --fill_missing
         env:
           PIPELINE_NAME: meteor_m2_lrpt
         min_files: 6
       - name: x_lrpt
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
-        args: --satellite_number M2-4 --fill_missing
+        args: --satellite_number=M2-4 --fill_missing
         env:
           PIPELINE_NAME: meteor_m2-x_lrpt
         min_files: 6
       - name: x_lrpt_80k
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
-        args: --satellite_number M2-4 --fill_missing
+        args: --satellite_number=M2-4 --fill_missing
         env:
           PIPELINE_NAME: meteor_m2-x_lrpt_80k
         min_files: 6
@@ -378,7 +378,7 @@ satellites:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: sstv_robot36
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
-        args: --sstv_mode Robot36 --satellite_norad 67290 --satellite_frequency 437.350e6 --enable_doppler 1 --bandwidth 12500
+        args: --sstv_mode=Robot36 --satellite_norad=67290 --satellite_frequency=437.350e6 --enable_doppler=true --bandwidth=12500
         env:
           PIPELINE_NAME: sstv_decoder
 
@@ -393,7 +393,7 @@ satellites:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: sstv_robot36
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
-        args: --sstv_mode Robot36 --satellite_norad 67284 --satellite_frequency 436.320e6 --enable_doppler 1 --bandwidth 12500
+        args: --sstv_mode=Robot36 --satellite_norad=67284 --satellite_frequency=436.320e6 --enable_doppler=true --bandwidth=12500
         env:
           PIPELINE_NAME: sstv_decoder
 
