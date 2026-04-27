@@ -26,7 +26,8 @@ RUN --mount=type=cache,target=/var/cache/apt \
     --mount=type=cache,target=/var/lib/apt \
     apt -y update && \
     apt -y upgrade && \
-    xargs -a packages.builder apt install --no-install-recommends -qy
+    xargs -a packages.builder apt install --no-install-recommends -qy && \
+    apt install --no-install-recommends -qy libsqlite3-dev
 
 RUN cmake -B build \
     -DCMAKE_BUILD_TYPE=Release \
@@ -56,6 +57,7 @@ RUN --mount=type=cache,target=/var/cache/apt \
     apt -y update && \
     apt -y upgrade && \
     xargs -a /usr/local/src/packages.runner apt install -qy && \
+    apt install -qy libsqlite3-0 libhdf5-cpp-103 && \
     apt install -qy /usr/local/src/satdump_*.deb && \
     rm -rf /usr/local/src/satdump
 
