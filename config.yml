@@ -292,6 +292,66 @@ satellites:
         env:
           PIPELINE_NAME: stratosat_tk1_uhf
 
+  - name: RTU-MIREA1
+    norad: 61785
+    frequency: 436.200e6
+    bandwidth: 128e3
+    gain: 40
+    sample_rate: 384e3
+    lo_offset: 100e3
+    priority: 2
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: geoscan
+        container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
+        env:
+          PIPELINE_NAME: rtumirea1_uhf
+
+  - name: TUSUR-GO
+    norad: 61782
+    frequency: 437.730e6
+    bandwidth: 128e3
+    gain: 40
+    sample_rate: 384e3
+    lo_offset: 100e3
+    priority: 2
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: geoscan
+        container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
+        env:
+          PIPELINE_NAME: tusur_go_uhf
+
+  - name: VIZARD-ION
+    norad: 61749
+    frequency: 436.870e6
+    bandwidth: 128e3
+    gain: 40
+    sample_rate: 384e3
+    lo_offset: 100e3
+    priority: 2
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: geoscan
+        container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
+        env:
+          PIPELINE_NAME: vizard_ion_uhf
+
+  - name: COLIBRI-S
+    norad: 61746
+    frequency: 436.835e6
+    bandwidth: 128e3
+    gain: 40
+    sample_rate: 384e3
+    lo_offset: 100e3
+    priority: 2
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: geoscan
+        container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
+        env:
+          PIPELINE_NAME: colibri_s_uhf
+
   - name: SAKHACUBE-CHOLBON
     norad: 67290
     frequency: 437.350e6

@@ -17,9 +17,7 @@ RUN --mount=type=cache,target=/var/cache/apt \
     apt -y upgrade && \
     apt install -y git
 
-RUN git clone --depth 1 \
-    --branch "$(git ls-remote --tags --sort='v:refname' https://github.com/SatDump/SatDump.git | tail -n1 | sed 's/.*\///')" \
-    https://github.com/SatDump/SatDump.git satdump
+RUN git clone --depth 1 https://github.com/SatDump/SatDump.git satdump
 
 WORKDIR /usr/local/src/satdump
 
