@@ -105,6 +105,8 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+    iq_upload: always
+
   - name: K-HERO
     norad: 66660
     frequency: 437.180e6
@@ -151,6 +153,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+    iq_upload: always
   - name: NUSHSAT-1
     norad: 63211
     frequency: 436.200e6
@@ -245,6 +248,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+    iq_upload: always
   - name: UND ROADS 2
     norad: 64549
     frequency: 435.400e6
