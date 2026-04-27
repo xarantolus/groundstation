@@ -27,6 +27,7 @@ satellites:
           PIPELINE_NAME: meteor_m2-x_lrpt_80k
         min_files: 6
     iq_upload: never
+    doppler_correction: false
 
   - name: Meteor M2-4
     norad: 59051
@@ -56,6 +57,7 @@ satellites:
           PIPELINE_NAME: meteor_m2-x_lrpt_80k
         min_files: 6
     iq_upload: never
+    doppler_correction: false
 
   # AX100 satellites
   - name: AISTECHSAT-2
@@ -74,6 +76,7 @@ satellites:
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
     iq_upload: always
+    doppler_correction: false
 
   - name: CATSAT
     norad: 60246
@@ -106,6 +109,7 @@ satellites:
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
     iq_upload: always
+    doppler_correction: false
 
   - name: K-HERO
     norad: 66660
@@ -138,6 +142,7 @@ satellites:
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
     iq_upload: always
+    doppler_correction: false
   - name: MIMAN
     norad: 52900
     frequency: 436.500e6
@@ -154,6 +159,7 @@ satellites:
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
     iq_upload: always
+    doppler_correction: false
   - name: NUSHSAT-1
     norad: 63211
     frequency: 436.200e6
@@ -170,6 +176,7 @@ satellites:
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
     iq_upload: always
+    doppler_correction: false
   - name: SNIPE-1
     norad: 56749
     frequency: 435.450e6
@@ -185,6 +192,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+    doppler_correction: false
     iq_upload: always
   - name: SNIPE-2
     norad: 56745
@@ -201,6 +209,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+    doppler_correction: false
     iq_upload: always
   - name: SNIPE-4
     norad: 56744
@@ -217,6 +226,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+    doppler_correction: false
     iq_upload: always
   - name: Suomi 100
     norad: 43804
@@ -248,6 +258,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+    doppler_correction: false
     iq_upload: always
   - name: UND ROADS 2
     norad: 64549
