@@ -6,7 +6,7 @@ import json
 import logging
 import os
 import uuid
-from typing import Optional
+from typing import Dict, Optional
 
 from . import events as E
 from .bus import EventBus, run_subscriber
@@ -22,6 +22,12 @@ logger = logging.getLogger("groundstation.recorder")
 # scheduler.RECORDING_LEAD_SECONDS, gives ~30s of margin on each side of the
 # official pass window.
 RECORDING_TRAIL_SECONDS = 30
+
+# Run the doppler ephemeris computation this many seconds before the planned
+# recorder launch (= pass_start - RECORDING_LEAD_SECONDS). Big enough that the
+# write finishes well before podman launches, so _record never blocks waiting
+# on it.
+DOPPLER_PRECOMPUTE_LEAD_SECONDS = 180
 
 
 class RecorderService:
@@ -44,18 +50,27 @@ class RecorderService:
         # cleanly without dropping events on the floor.
         self._active: Optional[asyncio.Task] = None
         self._tasks: set[asyncio.Task] = set()
+        # Per-pass background tasks that pre-write doppler.txt before the
+        # recorder launches. _record awaits the matching task before podman
+        # so the GR flowgraph never opens a missing file.
+        self._doppler_tasks: Dict[str, asyncio.Task] = {}
         self._sub = None
 
     async def run(self) -> None:
-        self._sub = self._bus.subscribe(E.PassStarted, name="recorder", queue_size=32)
+        self._sub = self._bus.subscribe(
+            E.PassStarted, E.PassPredicted, name="recorder", queue_size=64
+        )
         try:
             async for event in self._sub:
                 if self._stop.is_set():
                     break
                 try:
-                    self._handle_pass_started(event)  # type: ignore[arg-type]
+                    if isinstance(event, E.PassStarted):
+                        self._handle_pass_started(event)
+                    elif isinstance(event, E.PassPredicted):
+                        self._handle_pass_predicted(event)
                 except Exception:
-                    logger.exception("recorder failed handling PassStarted")
+                    logger.exception("recorder failed handling %s", type(event).__name__)
         finally:
             self._sub.close()
             for t in list(self._tasks):
@@ -66,12 +81,24 @@ class RecorderService:
                     await t
                 except (asyncio.CancelledError, Exception):
                     pass
+            for t in list(self._doppler_tasks.values()):
+                if not t.done():
+                    t.cancel()
+            for t in list(self._doppler_tasks.values()):
+                try:
+                    await t
+                except (asyncio.CancelledError, Exception):
+                    pass
+            self._doppler_tasks.clear()
 
     def stop(self) -> None:
         self._stop.set()
         if self._sub is not None:
             self._sub.close()
         for t in list(self._tasks):
+            if not t.done():
+                t.cancel()
+        for t in list(self._doppler_tasks.values()):
             if not t.done():
                 t.cancel()
 
@@ -82,6 +109,36 @@ class RecorderService:
         self._active = task
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+
+    def _handle_pass_predicted(self, event: E.PassPredicted) -> None:
+        p = event.pass_
+        if p.id in self._doppler_tasks:
+            return
+        task = asyncio.create_task(self._precompute_doppler(p), name=f"doppler-{p.id}")
+        self._doppler_tasks[p.id] = task
+        task.add_done_callback(lambda _t, pid=p.id: self._doppler_tasks.pop(pid, None))
+
+    async def _precompute_doppler(self, p: Pass) -> None:
+        """Sleep until shortly before the recorder launches, then write
+        doppler.txt off the event loop. _record awaits this so podman never
+        races the file."""
+        target = (
+            p.pass_info.start_time
+            - datetime.timedelta(seconds=RECORDING_LEAD_SECONDS + DOPPLER_PRECOMPUTE_LEAD_SECONDS)
+        )
+        delay = (target - datetime.datetime.now()).total_seconds()
+        if delay > 0:
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                raise
+        if datetime.datetime.now() >= p.pass_info.end_time:
+            return
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(None, self._write_doppler_file, p)
+        except Exception:
+            logger.exception("precompute doppler for %s failed; will retry inline at record time", p.id)
 
     async def _chain_record(self, p: Pass, prev: Optional[asyncio.Task]) -> None:
         # Wait for the previous recording to finish so SDR/podman teardown
@@ -97,12 +154,28 @@ class RecorderService:
     async def _record(self, p: Pass) -> None:
         os.makedirs(p.pass_dir, exist_ok=True)
         self._write_info_json(p)
-        try:
-            self._write_doppler_file(p)
-        except Exception as e:
-            logger.exception("could not write doppler file for %s", p.id)
-            await self._fail(p, f"doppler file generation failed: {e}")
-            return
+
+        # The precompute task should already be done by now (it fires
+        # ~3 minutes before record_at). Await it anyway so podman never
+        # races the doppler file write — a missing/partial doppler.txt
+        # crashes the GR flowgraph immediately.
+        precompute = self._doppler_tasks.pop(p.id, None)
+        if precompute is not None and not precompute.done():
+            logger.info("waiting for doppler precompute to finish for %s", p.id)
+            try:
+                await precompute
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        if not self._doppler_file_complete(p):
+            logger.info("doppler precompute missing for %s — writing inline", p.id)
+            loop = asyncio.get_running_loop()
+            try:
+                await loop.run_in_executor(None, self._write_doppler_file, p)
+            except Exception as e:
+                logger.exception("could not write doppler file for %s", p.id)
+                await self._fail(p, f"doppler file generation failed: {e}")
+                return
 
         p.status = PassStatus.RECORDING
         self._state.save_pass(p)
@@ -180,15 +253,22 @@ class RecorderService:
         logger.error("recorder failed for %s: %s", p.id, reason)
         await self._bus.publish(E.RecordingFailed(pass_id=p.id, error=reason))
 
+    def _doppler_file_complete(self, p: Pass) -> bool:
+        path = os.path.join(p.pass_dir, "doppler.txt")
+        try:
+            return os.path.getsize(path) > 0
+        except OSError:
+            return False
+
     def _write_doppler_file(self, p: Pass) -> None:
-        # Doppler timestamps are seconds-relative to `anchor` (≈ now), so the
-        # same file works during a later replay of recording.bin: the doppler
-        # block's sample-count timeline starts at 0 in both cases. Skew between
-        # this `now` and when the recorder actually opens the SDR is ~1-2s
-        # which is irrelevant given how smooth LEO doppler curves are.
+        # Doppler timestamps are seconds-relative to `anchor`, which we fix at
+        # the planned recorder launch time so the same value is used whether
+        # this runs at precompute time (T-3min) or as the inline fallback at
+        # PassStarted. The GR flowgraph anchors rx_time at flowgraph __init__
+        # which lands within ~10s of this anchor, well within doppler tolerance.
         path = os.path.join(p.pass_dir, "doppler.txt")
         buffer_s = 60
-        anchor = datetime.datetime.now()
+        anchor = p.pass_info.start_time - datetime.timedelta(seconds=RECORDING_LEAD_SECONDS)
         start = p.pass_info.start_time - datetime.timedelta(
             seconds=RECORDING_LEAD_SECONDS + buffer_s
         )

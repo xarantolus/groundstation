@@ -3,18 +3,14 @@ from __future__ import annotations
 import datetime
 import logging
 import os
+import time
 
 import ephem
 
 logger = logging.getLogger("groundstation.doppler")
 
-# Speed of light in m/s. ephem.range_velocity is in m/s.
 _C_M_S = 299_792_458.0
 
-# gr-satellites' satellites_doppler_correction reads <unix_ts>\t<doppler_hz>
-# pairs and interpolates between them. 0.1s matches the upstream
-# tle_to_doppler_file.py default and is fine-grained enough for LEO Doppler
-# without bloating the file (a 15-minute pass = ~9000 lines, ~200 KB).
 DEFAULT_TIME_STEP_S = 0.1
 
 
@@ -66,21 +62,37 @@ def write_doppler_file(
     duration_s = (end_utc - start_utc).total_seconds()
     n_samples = int(duration_s / time_step_s) + 1
 
+    logger.info(
+        "computing doppler for %s: %d samples over %.1fs at %.3f MHz",
+        os.path.basename(output_path),
+        n_samples,
+        duration_s,
+        f_carrier / 1e6,
+    )
+    t0 = time.monotonic()
+
+    # Build the whole file in memory and write once: the Pi's /tmp has
+    # high I/O latency and per-line writes through the default 8KB buffer
+    # still triggered ~20 flushes per file.
+    parts: list[str] = []
+    start_ts = start_utc.timestamp()
+    naive_start = start_utc.replace(tzinfo=None)
+    for i in range(n_samples):
+        offset = i * time_step_s
+        observer.date = naive_start + datetime.timedelta(seconds=offset)
+        sat_body.compute(observer)
+        # range_velocity > 0 when the satellite is receding.
+        range_rate = float(sat_body.range_velocity)
+        doppler_hz = -range_rate / _C_M_S * f_carrier
+        parts.append(f"{start_ts + offset - anchor_ts}\t{doppler_hz}\n")
+
+    compute_s = time.monotonic() - t0
+
     tmp_path = output_path + ".tmp"
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-    written = 0
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
-            for i in range(n_samples):
-                t = start_utc + datetime.timedelta(seconds=i * time_step_s)
-                # ephem expects a naive UTC datetime.
-                observer.date = t.replace(tzinfo=None)
-                sat_body.compute(observer)
-                # range_velocity > 0 when the satellite is receding.
-                range_rate = float(sat_body.range_velocity)
-                doppler_hz = -range_rate / _C_M_S * f_carrier
-                f.write(f"{t.timestamp() - anchor_ts}\t{doppler_hz}\n")
-                written += 1
+            f.write("".join(parts))
         os.replace(tmp_path, output_path)
     except Exception:
         try:
@@ -89,14 +101,15 @@ def write_doppler_file(
             pass
         raise
 
+    io_s = time.monotonic() - t0 - compute_s
     logger.info(
-        "wrote doppler file %s (%d samples over %.1fs, f=%.3f MHz)",
+        "wrote doppler file %s in %.2fs (compute %.2fs, io %.2fs)",
         output_path,
-        written,
-        duration_s,
-        f_carrier / 1e6,
+        compute_s + io_s,
+        compute_s,
+        io_s,
     )
-    return written
+    return n_samples
 
 
 def write_zero_doppler_file(
@@ -125,8 +138,10 @@ def write_zero_doppler_file(
     tmp_path = output_path + ".tmp"
     try:
         with open(tmp_path, "w", encoding="utf-8") as f:
-            f.write(f"{start_utc.timestamp() - anchor_ts}\t0\n")
-            f.write(f"{end_utc.timestamp() - anchor_ts}\t0\n")
+            f.write(
+                f"{start_utc.timestamp() - anchor_ts}\t0\n"
+                f"{end_utc.timestamp() - anchor_ts}\t0\n"
+            )
         os.replace(tmp_path, output_path)
     except Exception:
         try:
