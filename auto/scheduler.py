@@ -255,6 +255,12 @@ class SchedulerService:
 
             if self._known_passes.get(p.id) is not p:
                 return
+            sched_offset = (datetime.datetime.now() - record_at).total_seconds()
+            logger.info(
+                "publishing PassStarted for %s (sched offset %+.2fs)",
+                p.id,
+                sched_offset,
+            )
             await self._bus.publish(E.PassStarted(pass_=p))
 
             delay = (p.pass_info.end_time - datetime.datetime.now()).total_seconds()

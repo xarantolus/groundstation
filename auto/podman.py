@@ -262,7 +262,12 @@ async def run_recorder(
     stop_after_minutes: float,
     out_dir: str,
     log_callback: Optional[Callable[[str], None]] = None,
+    stop_event: Optional[asyncio.Event] = None,
 ) -> str:
+    """Run the SDR recorder in podman. Returns the recording.bin path on
+    normal completion *or* when ``stop_event`` is signalled (the partial
+    recording is still useful — only an empty file raises FileNotFoundError).
+    """
     envs = [
         f"FREQUENCY={sat.frequency}",
         f"BANDWIDTH={sat.bandwidth}",
@@ -274,11 +279,13 @@ async def run_recorder(
         envs.append(f"GAIN={sat.gain}")
     if sat.doppler_correction:
         envs.append("CORRECT_DOPPLER=1")
+    container_name = f"gs-recorder-{uuid.uuid4().hex[:12]}"
     cmd: List[str] = [
         "podman",
         "run",
         "--rm",
         "--read-only",
+        "--name", container_name,
         *COMMON_FLAGS,
         *(["--userns=keep-id"] if not _is_root() else []),
         *sum([["-e", e] for e in envs], []),
@@ -294,19 +301,37 @@ async def run_recorder(
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
     )
 
-    gathered = asyncio.gather(
+    main_task = asyncio.ensure_future(asyncio.gather(
         _read_stream(process.stdout, log_callback),
         _read_stream(process.stderr, log_callback, "ERR: "),
         process.wait(),
-    )
+    ))
+    waiters: List[asyncio.Future] = [main_task]
+    stop_task: Optional[asyncio.Task] = None
+    if stop_event is not None:
+        stop_task = asyncio.create_task(stop_event.wait())
+        waiters.append(stop_task)
+
     try:
-        await asyncio.wait_for(gathered, timeout=stop_after_minutes * 60)
-    except asyncio.TimeoutError:
-        logger.info("recorder exceeded %s min — terminating", stop_after_minutes)
-        await _terminate(process)
+        timeout = stop_after_minutes * 60
+        done, _ = await asyncio.wait(
+            waiters, timeout=timeout, return_when=asyncio.FIRST_COMPLETED
+        )
+        if not done:
+            logger.info("recorder exceeded %s min — terminating", stop_after_minutes)
+            await _terminate(process, container_name)
+            await asyncio.gather(main_task, return_exceptions=True)
+        elif stop_task is not None and stop_task in done:
+            logger.info("recorder stop signalled — killing container %s", container_name)
+            await _terminate(process, container_name)
+            await asyncio.gather(main_task, return_exceptions=True)
     except asyncio.CancelledError:
-        await _terminate(process)
+        await _terminate(process, container_name)
+        await asyncio.gather(main_task, return_exceptions=True)
         raise
+    finally:
+        if stop_task is not None and not stop_task.done():
+            stop_task.cancel()
 
     out_file = os.path.join(out_dir, "recording.bin")
     if not os.path.isfile(out_file):

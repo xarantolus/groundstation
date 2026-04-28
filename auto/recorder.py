@@ -5,6 +5,7 @@ import datetime
 import json
 import logging
 import os
+import time
 import uuid
 from typing import Dict, Optional
 
@@ -50,6 +51,11 @@ class RecorderService:
         # cleanly without dropping events on the floor.
         self._active: Optional[asyncio.Task] = None
         self._tasks: set[asyncio.Task] = set()
+        # Stop signal for the currently-running run_recorder (if any). A new
+        # PassStarted sets this to make the prior recorder exit eagerly so the
+        # SDR is free for the next pass — beats `await prev` which waits for
+        # the prior trail seconds and bookkeeping to finish naturally.
+        self._active_stop: Optional[asyncio.Event] = None
         # Per-pass background tasks that pre-write doppler.txt before the
         # recorder launches. _record awaits the matching task before podman
         # so the GR flowgraph never opens a missing file.
@@ -104,7 +110,14 @@ class RecorderService:
 
     def _handle_pass_started(self, event: E.PassStarted) -> None:
         p = event.pass_
+        logger.info("recorder: PassStarted received for %s", p.id)
         prev = self._active
+        if prev is not None and not prev.done() and self._active_stop is not None:
+            if not self._active_stop.is_set():
+                logger.info(
+                    "recorder: signalling prev recording to stop so %s can launch", p.id
+                )
+                self._active_stop.set()
         task = asyncio.create_task(self._chain_record(p, prev))
         self._active = task
         self._tasks.add(task)
@@ -141,17 +154,25 @@ class RecorderService:
             logger.exception("precompute doppler for %s failed; will retry inline at record time", p.id)
 
     async def _chain_record(self, p: Pass, prev: Optional[asyncio.Task]) -> None:
-        # Wait for the previous recording to finish so SDR/podman teardown
-        # completes before we retune. _record's own late-start guard handles
-        # the case where waiting pushed us past the new pass's window.
+        # Wait for the previous recording to finish (it should already be
+        # tearing down because _handle_pass_started set its stop event).
+        # _record's own late-start guard handles the case where waiting
+        # pushed us past the new pass's window.
         if prev is not None and not prev.done():
+            wait_t0 = time.monotonic()
+            logger.info("recorder: %s awaiting prev recording", p.id)
             try:
                 await prev
             except (asyncio.CancelledError, Exception):
                 pass
+            logger.info(
+                "recorder: %s prev done after %.2fs", p.id, time.monotonic() - wait_t0
+            )
         await self._record(p)
 
     async def _record(self, p: Pass) -> None:
+        record_t0 = time.monotonic()
+        logger.info("recorder: _record entered for %s", p.id)
         os.makedirs(p.pass_dir, exist_ok=True)
         self._write_info_json(p)
 
@@ -178,8 +199,20 @@ class RecorderService:
                 return
 
         p.status = PassStatus.RECORDING
+        save_t0 = time.monotonic()
         self._state.save_pass(p)
+        publish_t0 = time.monotonic()
         await self._bus.publish(E.RecordingStarted(pass_id=p.id))
+        logger.info(
+            "recorder: setup for %s took %.2fs (save_pass %.2fs, publish %.2fs)",
+            p.id,
+            time.monotonic() - record_t0,
+            publish_t0 - save_t0,
+            time.monotonic() - publish_t0,
+        )
+
+        stop_event = asyncio.Event()
+        self._active_stop = stop_event
 
         loop = asyncio.get_running_loop()
 
@@ -204,21 +237,26 @@ class RecorderService:
             return
 
         try:
-            path = await run_recorder(
-                p.satellite,
-                record_minutes,
-                p.pass_dir,
-                log_callback=on_log,
-            )
-        except FileNotFoundError as e:
-            await self._fail(p, f"recorder produced no output: {e}")
-            return
-        except asyncio.CancelledError:
-            await self._fail(p, "recording cancelled")
-            raise
-        except Exception as e:
-            await self._fail(p, f"recorder crashed: {e}")
-            return
+            try:
+                path = await run_recorder(
+                    p.satellite,
+                    record_minutes,
+                    p.pass_dir,
+                    log_callback=on_log,
+                    stop_event=stop_event,
+                )
+            except FileNotFoundError as e:
+                await self._fail(p, f"recorder produced no output: {e}")
+                return
+            except asyncio.CancelledError:
+                await self._fail(p, "recording cancelled")
+                raise
+            except Exception as e:
+                await self._fail(p, f"recorder crashed: {e}")
+                return
+        finally:
+            if self._active_stop is stop_event:
+                self._active_stop = None
 
         p.recording_path = path
         p.status = PassStatus.RECORDED
