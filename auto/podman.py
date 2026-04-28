@@ -14,7 +14,7 @@ from .models import Decoder, Satellite
 logger = logging.getLogger("groundstation.podman")
 
 RECORDER_IMAGE = "ghcr.io/xarantolus/groundstation/satellite-recorder:latest"
-DEFAULT_DECODER_TIMEOUT_MINUTES: float | None = 30.0
+DEFAULT_DECODER_TIMEOUT_MINUTES: float | None = 10.0
 
 
 def _cgroup_memory_available() -> bool:
