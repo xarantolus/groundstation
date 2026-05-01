@@ -10,30 +10,48 @@
     --text:#e0e0e0;--text2:#a0a0a0;
     --accent:#00bcd4;--live:#00e676;--warn:#ff9800;--err:#f44336;
     --border:#333;
+    --map-land:#3a3a3a;--map-grid:#2a2a2a;
+    --track-rec:#00e676;--track-visible:#42a5f5;--track-bad:#f44336;
     --font:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
     --mono:'Consolas','Monaco',monospace;
   }
   body{background:var(--bg);color:var(--text);font-family:var(--font);margin:0;padding:16px;font-size:14px}
-  .grid{max-width:1400px;margin:0 auto;display:grid;grid-gap:16px;grid-template-columns:3fr 1fr;grid-template-rows:auto auto 1fr;height:calc(100vh - 32px)}
+  .grid{max-width:1400px;margin:0 auto;display:grid;grid-gap:16px;grid-template-columns:3fr 1fr}
   .card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;display:flex;flex-direction:column;overflow:hidden}
   .card h2{font-size:.95em;letter-spacing:.04em;text-transform:uppercase;color:var(--accent);margin:0 0 10px 0;border-bottom:1px solid var(--border);padding-bottom:8px;font-weight:600}
   .card-body{flex:1;overflow-y:auto}
   .hidden{display:none !important}
-  #passes{grid-column:1/2;grid-row:1/2;min-height:240px}
-  #transfers{grid-column:2/3;grid-row:1/3;min-height:240px}
-  #decoder{grid-column:1/2;grid-row:2/3;min-height:140px}
-  #logs{grid-column:1/-1;grid-row:3/4;min-height:240px}
+  #tracking{grid-column:1/-1}
+  #passes{grid-column:1/2}
+  #transfers{grid-column:2/3}
+  #decoder{grid-column:1/-1}
+  #logs{grid-column:1/-1}
 
-  /* Mobile / narrow viewport: stack cards top-to-bottom as a plain flex
-     column. No grid, no fixed heights, no viewport-clipping — each card
-     sizes itself to its content and they scroll with the page. */
+  /* Mobile / narrow viewport: stack everything vertically. */
   @media (max-width:1024px){
     body{padding:10px}
-    .grid{display:flex;flex-direction:column;gap:12px;height:auto;max-width:none}
-    .card{width:auto;min-height:0;grid-column:auto;grid-row:auto}
-    #passes,#gate,#transfers,#decoder,#logs{grid-column:auto;grid-row:auto;min-height:0}
+    .grid{display:flex;flex-direction:column;gap:12px;max-width:none}
+    .card{width:auto;grid-column:auto}
+    #tracking,#passes,#transfers,#decoder,#logs{grid-column:auto}
     #decoder .card-body,#logs .card-body{max-height:40vh}
   }
+
+  /* Tracking panel: regional ground track + polar side-by-side on desktop. */
+  .tracking-grid{display:grid;gap:12px;grid-template-columns:2fr 1fr;align-items:start}
+  @media (max-width:1024px){.tracking-grid{grid-template-columns:1fr}}
+  .map-wrap,.polar-wrap{position:relative;width:100%;background:var(--surface2);border-radius:6px;overflow:hidden}
+  .map-wrap{aspect-ratio:1.6/1;max-height:60vh}
+  .polar-wrap{aspect-ratio:1/1;max-height:60vh;max-width:60vh;justify-self:center}
+  @media (max-width:1024px){
+    .map-wrap{aspect-ratio:4/3;max-height:60vh}
+    .polar-wrap{max-height:55vh;max-width:min(85vw,28rem)}
+  }
+  .map-wrap canvas,.polar-wrap canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .tracking-caption{margin-top:10px;color:var(--text2);font-size:.9em;display:flex;justify-content:space-between;flex-wrap:wrap;gap:6px}
+  .tracking-caption b{color:var(--text)}
+  .tracking-empty{padding:24px;text-align:center;color:var(--text2)}
+  .legend{display:flex;gap:10px;flex-wrap:wrap;font-size:.8em;margin-top:6px;color:var(--text2)}
+  .legend-dot{display:inline-block;width:.75em;height:.75em;border-radius:50%;margin-right:4px;vertical-align:middle}
 
   table{width:100%;border-collapse:collapse;font-size:1em}
   th{text-align:left;border-bottom:1px solid var(--border);padding:6px 8px;color:var(--text2);font-weight:normal}
@@ -41,8 +59,12 @@
   tr:last-child td{border-bottom:none}
   tr.past{opacity:.55}
   tr.live{color:var(--live);font-weight:bold;animation:pulse 2s infinite}
+  tr.selectable{cursor:pointer}
+  tr.selectable:hover td{background:rgba(0,188,212,.08)}
+  tr.selected td{background:rgba(0,188,212,.14)}
   @keyframes pulse{50%{opacity:.7}}
   td a{color:inherit;text-decoration:none;border-bottom:1px dotted #777}
+  td a:hover{color:var(--accent)}
 
   .status-pill{display:inline-block;padding:2px 6px;border-radius:8px;font-size:.8em;background:var(--surface2);color:var(--text2)}
   .status-recording,.status-decoding{background:var(--accent);color:#000}
@@ -68,10 +90,42 @@
 
   .decoder-log{font-family:var(--mono);font-size:.88em;color:#aaa;line-height:1.3;white-space:pre-wrap;word-break:break-all}
   .dim{color:var(--text2)}
+
+  /* Pass detail modal */
+  .modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.7);display:flex;align-items:center;justify-content:center;z-index:1000;padding:1rem}
+  .modal-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;width:min(95vw,60rem);max-height:92vh;display:flex;flex-direction:column;overflow:hidden}
+  .modal-header{display:flex;justify-content:space-between;align-items:center;padding:.75rem 1rem;border-bottom:1px solid var(--border)}
+  .modal-header h3{margin:0;font-size:1rem;color:var(--accent)}
+  .modal-close{background:transparent;border:none;color:var(--text2);font-size:1.5rem;cursor:pointer;padding:0 .5rem;line-height:1}
+  .modal-close:hover{color:var(--text)}
+  .modal-body{padding:1rem;overflow-y:auto;display:grid;gap:1rem}
+  .modal-stats{display:grid;grid-template-columns:max-content 1fr;gap:.25rem 1rem;font-size:.95em}
+  .modal-stats .k{color:var(--text2)}
+  .modal-polar-wrap{aspect-ratio:1/1;width:min(100%,28rem);justify-self:center;background:var(--surface2);border-radius:6px;position:relative}
+  .modal-polar-wrap canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .modal-waterfall{margin-top:.5rem}
+  .modal-waterfall img{width:100%;height:auto;display:block;border-radius:4px;background:#000}
+  .modal-waterfall-missing{color:var(--text2);font-size:.9em;text-align:center;padding:1rem}
 </style>
 </head>
 <body>
 <div class="grid">
+  <section id="tracking" class="card">
+    <h2>Tracking</h2>
+    <div class="tracking-grid">
+      <div class="map-wrap"><canvas id="map-canvas"></canvas></div>
+      <div class="polar-wrap"><canvas id="polar-canvas"></canvas></div>
+    </div>
+    <div class="tracking-caption" id="tracking-caption">
+      <span class="dim">waiting for a pass…</span>
+    </div>
+    <div class="legend">
+      <span><span class="legend-dot" style="background:#00e676"></span>recording</span>
+      <span><span class="legend-dot" style="background:#42a5f5"></span>in view, not recording</span>
+      <span><span class="legend-dot" style="background:#f44336"></span>below horizon</span>
+    </div>
+  </section>
+
   <section id="passes" class="card">
     <h2>Next overpasses</h2>
     <div class="card-body">
@@ -98,11 +152,17 @@
   </section>
 </div>
 
+<script src="/static/satellite.min.js"></script>
 <script>
 const COMPASS = ["N","NE","E","SE","S","SW","W","NW"];
 const compass = az => COMPASS[Math.floor((((az+22.5)%360)+360)%360/45)];
 const DECODER_LOG_CAP = 300;
 const MAIN_LOG_CAP = 500;
+const LIVE_TICK_MS = 1000;
+const TRACK_SAMPLES = 120;
+const EARTH_R_KM = 6378.137;
+const MAP_WIDTH_KM = 10000;    // visible width of the regional map, centered on station
+const TRACK_COLORS = { rec: '#00e676', visible: '#42a5f5', bad: '#f44336' };
 
 const state = {
   passes: [],
@@ -114,12 +174,21 @@ const state = {
   completed_transfers: [],
   main_log: [],
   decoder_log: [],
+  station: null,           // {lat, lon, alt_m}
+  threshold_deg: 5.0,      // pass elevation threshold
+  selected_pass_id: null,  // user-pinned selection (null = auto)
+  coastlines: null,        // GeoJSON loaded from /static/coastlines.geojson
 };
-const pendingKeys = new Set();   // "pass_id#idx" — authoritative pending set on the client
+const pendingKeys = new Set();
+const satrecCache = new Map();   // pass.id -> satellite.js satrec
+const trackCache = new Map();    // pass.id -> {samples: [...], station_key}
 
 function fmtTime(iso){
   const d = new Date(iso);
   return d.toLocaleTimeString(undefined,{hour12:false});
+}
+function fmtFullTime(iso){
+  return new Date(iso).toLocaleString(undefined,{hour12:false});
 }
 function fmtStartDisplay(pass, now){
   const start = new Date(pass.pass_info.start_time);
@@ -153,6 +222,8 @@ function fmtBytes(n){
   return `${v.toFixed(1)} TB`;
 }
 
+/* ---------- Passes table ---------- */
+
 function renderPasses(){
   const body = document.getElementById('passes-body');
   const now = new Date();
@@ -160,23 +231,72 @@ function renderPasses(){
   const past = state.passes.filter(p => new Date(p.pass_info.end_time) <= now);
   const future = state.passes.filter(p => new Date(p.pass_info.end_time) > now);
   const display = past.slice(-1).concat(future).slice(0, 15);
+  const selectedId = effectiveSelectedPassId();
   const rows = display.map(p => {
     const start = new Date(p.pass_info.start_time);
     const end = new Date(p.pass_info.end_time);
     const isLive = start < now && end > now;
     const isPast = end <= now;
-    const cls = isLive ? "live" : (isPast ? "past" : "");
+    const cls = ["selectable"];
+    if (isLive) cls.push("live");
+    else if (isPast) cls.push("past");
+    if (p.id === selectedId) cls.push("selected");
     const startStr = fmtStartDisplay(p, now);
     const durationStr = fmtDurationCell(p, now);
     const dir = [compass(p.pass_info.start_azimuth), compass(p.pass_info.max_azimuth), compass(p.pass_info.end_azimuth)].join("→");
     const norad = p.satellite.norad;
     const name = escapeHtml(p.satellite.name);
-    const nameHtml = norad ? `<a href="https://www.n2yo.com/satellite/?s=${encodeURIComponent(norad)}" target="_blank" rel="noreferrer">${name}</a>` : name;
+    const nameHtml = norad ? `<a href="https://www.n2yo.com/satellite/?s=${encodeURIComponent(norad)}" target="_blank" rel="noreferrer" data-stop-row>${name}</a>` : name;
     const status = escapeHtml(p.status);
-    return `<tr class="${cls}"><td>${nameHtml}</td><td>${escapeHtml(startStr)}</td><td>${escapeHtml(durationStr)}</td><td>${p.pass_info.max_elevation.toFixed(1)}°</td><td>${dir}</td><td><span class="status-pill status-${status}">${status}</span></td></tr>`;
+    return `<tr class="${cls.join(' ')}" data-pass-id="${escapeHtml(p.id)}"><td>${nameHtml}</td><td class="cell-start">${escapeHtml(startStr)}</td><td class="cell-duration">${escapeHtml(durationStr)}</td><td>${p.pass_info.max_elevation.toFixed(1)}°</td><td>${dir}</td><td><span class="status-pill status-${status}">${status}</span></td></tr>`;
   });
   body.innerHTML = rows.join("");
 }
+
+// 1Hz refresh of the live countdown / "(LIVE)" / "(ended)" text. Mutates
+// just the affected cells/classes so the .live row's pulse animation isn't
+// restarted on every tick.
+function tickPasses(){
+  const tbody = document.getElementById('passes-body');
+  if (!tbody) return;
+  const rows = tbody.querySelectorAll('tr[data-pass-id]');
+  if (!rows.length) return;
+  const now = new Date();
+  for (const tr of rows){
+    const p = state.passes.find(x => x.id === tr.getAttribute('data-pass-id'));
+    if (!p) continue;
+    const start = new Date(p.pass_info.start_time);
+    const end = new Date(p.pass_info.end_time);
+    const isLive = start < now && end > now;
+    const isPast = end <= now;
+    const wantLive = isLive, wantPast = !isLive && isPast;
+    if (tr.classList.contains('live') !== wantLive){
+      tr.classList.toggle('live', wantLive);
+    }
+    if (tr.classList.contains('past') !== wantPast){
+      tr.classList.toggle('past', wantPast);
+    }
+    const startCell = tr.querySelector('.cell-start');
+    const durCell = tr.querySelector('.cell-duration');
+    if (startCell) startCell.textContent = fmtStartDisplay(p, now);
+    if (durCell) durCell.textContent = fmtDurationCell(p, now);
+  }
+}
+
+document.getElementById('passes-body').addEventListener('click', e => {
+  if (e.target.closest('[data-stop-row]')) return;
+  const tr = e.target.closest('tr[data-pass-id]');
+  if (!tr) return;
+  const passId = tr.getAttribute('data-pass-id');
+  const p = state.passes.find(x => x.id === passId);
+  if (!p) return;
+  state.selected_pass_id = passId;
+  renderPasses();
+  redrawTracking();
+  openPassModal(p);
+});
+
+/* ---------- Transfers / decoder log / system log (unchanged) ---------- */
 
 function renderTransfers(){
   const body = document.getElementById('transfers-body');
@@ -219,7 +339,6 @@ function renderDecoder(){
   const card = document.getElementById('decoder');
   const title = document.getElementById('decoder-title');
   const body = document.getElementById('decoder-body');
-
   if (state.decoding){
     card.classList.remove('hidden');
     const d = state.decoding;
@@ -233,9 +352,6 @@ function renderDecoder(){
     }
     return;
   }
-
-  // Not currently decoding. Show a small "N waiting" note if the queue has
-  // items, otherwise hide the card entirely.
   if (state.pending_decoders > 0){
     card.classList.remove('hidden');
     title.textContent = 'Decoders';
@@ -243,7 +359,6 @@ function renderDecoder(){
     body.innerHTML = `<div class="queue-note">${n} decoder${n === 1 ? '' : 's'} waiting in queue</div>`;
     return;
   }
-
   card.classList.add('hidden');
   body.textContent = '';
 }
@@ -260,6 +375,8 @@ function renderLogs(){
   if (atBottom) body.scrollTop = body.scrollHeight;
 }
 
+/* ---------- Snapshot / event plumbing ---------- */
+
 function applySnapshot(snap){
   state.passes = snap.passes || [];
   state.recording = snap.recording || null;
@@ -270,42 +387,47 @@ function applySnapshot(snap){
   state.completed_transfers = snap.completed_transfers || [];
   state.main_log = snap.main_log || [];
   state.decoder_log = snap.decoder_log || [];
+  state.station = snap.station || null;
+  if (typeof snap.pass_elevation_threshold_deg === 'number') state.threshold_deg = snap.pass_elevation_threshold_deg;
   pendingKeys.clear();
+  invalidateTrackCacheForStationChange();
   renderAll();
+  redrawTracking();
 }
 
 function applyEvent(ev){
   const t = ev.type;
   if (t === 'passes_table_changed'){
     state.passes = ev.passes || [];
+    pruneCachesForKnownPasses();
     renderPasses();
+    redrawTracking();
   } else if (t === 'pass_predicted' || t === 'pass_upcoming' || t === 'pass_started' || t === 'pass_ended'){
     const p = ev.pass;
     const i = state.passes.findIndex(x => x.id === p.id);
     if (i >= 0) state.passes[i] = p; else state.passes.push(p);
     state.passes.sort((a,b) => new Date(a.pass_info.start_time) - new Date(b.pass_info.start_time));
+    invalidatePassCaches(p.id);
     renderPasses();
+    redrawTracking();
   } else if (t === 'recording_started'){
-    state.recording = ev.pass_id; setPassStatus(ev.pass_id, 'recording'); renderPasses();
+    state.recording = ev.pass_id; setPassStatus(ev.pass_id, 'recording'); renderPasses(); redrawTracking();
   } else if (t === 'recording_completed'){
     if (state.recording === ev.pass_id) state.recording = null;
-    setPassStatus(ev.pass_id, 'recorded'); renderPasses();
+    setPassStatus(ev.pass_id, 'recorded'); renderPasses(); redrawTracking();
   } else if (t === 'recording_failed'){
     if (state.recording === ev.pass_id) state.recording = null;
     setPassStatus(ev.pass_id, 'failed'); renderPasses();
   } else if (t === 'decode_queued'){
     const k = `${ev.pass_id}#${ev.decoder_index}`;
-    if (!pendingKeys.has(k)){
-      pendingKeys.add(k);
-      state.pending_decoders = pendingKeys.size;
-    }
+    if (!pendingKeys.has(k)){ pendingKeys.add(k); state.pending_decoders = pendingKeys.size; }
     renderDecoder();
   } else if (t === 'decode_started'){
     const k = `${ev.pass_id}#${ev.decoder_index}`;
     pendingKeys.delete(k);
     state.pending_decoders = pendingKeys.size;
     state.decoding = {pass_id: ev.pass_id, decoder_index: ev.decoder_index, decoder_name: ev.decoder_name};
-    state.decoder_log = [];  // fresh log per decoder run
+    state.decoder_log = [];
     setPassStatus(ev.pass_id, 'decoding');
     renderDecoder(); renderPasses();
   } else if (t === 'decode_completed' || t === 'decode_failed'){
@@ -328,8 +450,7 @@ function applyEvent(ev){
     }
   } else if (t === 'transfer_started'){
     state.queued_transfers = state.queued_transfers.filter(x => x.request_id !== ev.request_id);
-    const existing = state.active_transfers.find(x => x.request_id === ev.request_id);
-    if (!existing){
+    if (!state.active_transfers.find(x => x.request_id === ev.request_id)){
       state.active_transfers.push({request_id: ev.request_id, source_path: ev.source_path, destination_path: ev.destination_path, label: ev.label, copied: 0, total: 0, progress: 0});
     }
     renderTransfers();
@@ -369,6 +490,744 @@ function setPassStatus(pass_id, status){
 
 function renderAll(){ renderPasses(); renderTransfers(); renderDecoder(); renderLogs(); }
 
+/* ---------- TLE / propagation helpers (satellite.js) ---------- */
+
+function getSatrec(p){
+  let s = satrecCache.get(p.id);
+  if (s) return s;
+  try {
+    s = satellite.twoline2satrec(p.pass_info.tle1, p.pass_info.tle2);
+  } catch(e){ return null; }
+  if (!s) return null;
+  satrecCache.set(p.id, s);
+  return s;
+}
+
+function propagate(satrec, date){
+  const pv = satellite.propagate(satrec, date);
+  if (!pv || !pv.position || typeof pv.position === 'boolean') return null;
+  const gmst = satellite.gstime(date);
+  const geo = satellite.eciToGeodetic(pv.position, gmst);
+  return {
+    lat: satellite.degreesLat(geo.latitude),
+    lon: satellite.degreesLong(geo.longitude),
+    alt_km: geo.height,
+    eci: pv.position,
+    gmst: gmst,
+  };
+}
+
+function lookAngleAt(satrec, date, station){
+  if (!station) return null;
+  const pv = satellite.propagate(satrec, date);
+  if (!pv || !pv.position || typeof pv.position === 'boolean') return null;
+  const gmst = satellite.gstime(date);
+  const observer = {
+    latitude: satellite.degreesToRadians(station.lat),
+    longitude: satellite.degreesToRadians(station.lon),
+    height: (station.alt_m || 0) / 1000,
+  };
+  const ecf = satellite.eciToEcf(pv.position, gmst);
+  const look = satellite.ecfToLookAngles(observer, ecf);
+  return {
+    az: (satellite.radiansToDegrees(look.azimuth) + 360) % 360,
+    el: satellite.radiansToDegrees(look.elevation),
+    range_km: look.rangeSat,
+  };
+}
+
+function stationKey(s){ return s ? `${s.lat.toFixed(5)},${s.lon.toFixed(5)},${(s.alt_m||0).toFixed(1)}` : 'none'; }
+
+function invalidatePassCaches(passId){
+  satrecCache.delete(passId);
+  trackCache.delete(passId);
+}
+function invalidateTrackCacheForStationChange(){
+  trackCache.clear();
+}
+function pruneCachesForKnownPasses(){
+  const known = new Set(state.passes.map(p => p.id));
+  for (const k of Array.from(satrecCache.keys())) if (!known.has(k)) satrecCache.delete(k);
+  for (const k of Array.from(trackCache.keys())) if (!known.has(k)) trackCache.delete(k);
+}
+
+function computeTrack(p){
+  if (!state.station) return null;
+  const skey = stationKey(state.station);
+  const cached = trackCache.get(p.id);
+  if (cached && cached.station_key === skey) return cached.samples;
+  const sr = getSatrec(p);
+  if (!sr) return null;
+  const t0 = new Date(p.pass_info.start_time).getTime();
+  const t1 = new Date(p.pass_info.end_time).getTime();
+  if (!(t1 > t0)) return null;
+  const samples = [];
+  for (let i = 0; i <= TRACK_SAMPLES; i++){
+    const t = new Date(t0 + (t1 - t0) * (i / TRACK_SAMPLES));
+    const sub = propagate(sr, t);
+    if (!sub) continue;
+    const la = lookAngleAt(sr, t, state.station);
+    samples.push({
+      t,
+      lat: sub.lat, lon: sub.lon, alt_km: sub.alt_km,
+      az: la ? la.az : 0,
+      el: la ? la.el : -90,
+    });
+  }
+  trackCache.set(p.id, {station_key: skey, samples});
+  return samples;
+}
+
+/* ---------- Selected pass / overlay picker ---------- */
+
+function effectiveSelectedPassId(){
+  if (state.selected_pass_id){
+    const exists = state.passes.find(x => x.id === state.selected_pass_id);
+    if (exists) return state.selected_pass_id;
+  }
+  // auto: live pass first, else next upcoming
+  const now = Date.now();
+  const live = state.passes.find(p => {
+    const s = +new Date(p.pass_info.start_time), e = +new Date(p.pass_info.end_time);
+    return s <= now && now <= e;
+  });
+  if (live) return live.id;
+  const upcoming = state.passes
+    .filter(p => +new Date(p.pass_info.end_time) > now)
+    .sort((a,b) => +new Date(a.pass_info.start_time) - +new Date(b.pass_info.start_time))[0];
+  return upcoming ? upcoming.id : null;
+}
+
+function pickOverlayPasses(selectedId){
+  if (!selectedId) return [];
+  const idx = state.passes.findIndex(p => p.id === selectedId);
+  if (idx < 0) return [];
+  const tail = state.passes.slice(idx + 1).filter(p => +new Date(p.pass_info.end_time) > Date.now());
+  return tail.slice(0, 2);
+}
+
+/* ---------- Canvas DPR fitting ---------- */
+
+function fitCanvas(canvas){
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  if (!w || !h) return null;
+  const targetW = Math.round(w * dpr), targetH = Math.round(h * dpr);
+  if (canvas.width !== targetW || canvas.height !== targetH){
+    canvas.width = targetW;
+    canvas.height = targetH;
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return {ctx, w, h};
+}
+
+/* ---------- Regional equirectangular projection (centered on station) ----------
+ * The map shows a window MAP_WIDTH_KM across at the station's latitude. The
+ * vertical span follows from the canvas's actual aspect ratio so the geometry
+ * stays approximately correct after CSS reshapes the map (max-height etc).
+ * Longitude differences are wrapped to (-180, 180] so antimeridian-crossing
+ * tracks (e.g. for stations near the dateline) project continuously.
+ */
+
+function regionalProjection(w, h){
+  const station = state.station;
+  if (!station){
+    return null;
+  }
+  const aspect = w / h;
+  const widthKm = MAP_WIDTH_KM;
+  const heightKm = widthKm / aspect;
+  const cosLat = Math.max(0.1, Math.cos(station.lat * Math.PI / 180));
+  return {
+    centerLat: station.lat,
+    centerLon: station.lon,
+    halfLatSpan: (heightKm / 2) / 111.0,
+    halfLonSpan: (widthKm / 2) / (111.0 * cosLat),
+  };
+}
+
+function projectLL(lon, lat, w, h){
+  const proj = regionalProjection(w, h);
+  if (!proj){
+    // No station configured — fall back to a global equirectangular view.
+    return [((lon + 180) / 360) * w, ((90 - lat) / 180) * h];
+  }
+  let dlon = lon - proj.centerLon;
+  while (dlon > 180) dlon -= 360;
+  while (dlon < -180) dlon += 360;
+  const dlat = proj.centerLat - lat;
+  return [
+    (dlon + proj.halfLonSpan) / (proj.halfLonSpan * 2) * w,
+    (dlat + proj.halfLatSpan) / (proj.halfLatSpan * 2) * h,
+  ];
+}
+
+/* ---------- Coastlines ---------- */
+
+async function loadCoastlines(){
+  if (state.coastlines) return state.coastlines;
+  try {
+    const r = await fetch('/static/coastlines.geojson');
+    if (!r.ok) return null;
+    state.coastlines = await r.json();
+    return state.coastlines;
+  } catch(e){
+    return null;
+  }
+}
+
+function drawCoastlines(ctx, w, h){
+  const gj = state.coastlines;
+  if (!gj || !gj.features) return;
+  ctx.strokeStyle = '#3a3a3a';
+  ctx.lineWidth = Math.max(0.5, w * 0.0012);
+  ctx.beginPath();
+  for (const feat of gj.features){
+    const geom = feat.geometry;
+    if (!geom) continue;
+    const lines = (geom.type === 'LineString') ? [geom.coordinates]
+                : (geom.type === 'MultiLineString') ? geom.coordinates
+                : null;
+    if (!lines) continue;
+    for (const line of lines){
+      for (let i = 0; i < line.length; i++){
+        const [lon, lat] = line[i];
+        const [x, y] = projectLL(lon, lat, w, h);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+    }
+  }
+  ctx.stroke();
+}
+
+function pickGridStep(spanDeg){
+  // Rough heuristic: aim for ~6-8 gridlines across the visible span.
+  const candidates = [1, 2, 5, 10, 15, 20, 30];
+  for (const step of candidates){
+    if (spanDeg / step <= 8) return step;
+  }
+  return 30;
+}
+
+function drawMapGrid(ctx, w, h){
+  const proj = regionalProjection(w, h);
+  if (!proj){
+    ctx.strokeStyle = '#262626';
+    ctx.lineWidth = Math.max(0.5, w * 0.0005);
+    ctx.beginPath();
+    for (let lon = -150; lon <= 150; lon += 30){
+      const [x] = projectLL(lon, 0, w, h);
+      ctx.moveTo(x, 0); ctx.lineTo(x, h);
+    }
+    for (let lat = -60; lat <= 60; lat += 30){
+      const [, y] = projectLL(0, lat, w, h);
+      ctx.moveTo(0, y); ctx.lineTo(w, y);
+    }
+    ctx.stroke();
+    return;
+  }
+  const lonStep = pickGridStep(proj.halfLonSpan * 2);
+  const latStep = pickGridStep(proj.halfLatSpan * 2);
+  const lonMin = Math.floor((proj.centerLon - proj.halfLonSpan) / lonStep) * lonStep;
+  const lonMax = Math.ceil((proj.centerLon + proj.halfLonSpan) / lonStep) * lonStep;
+  const latMin = Math.floor((proj.centerLat - proj.halfLatSpan) / latStep) * latStep;
+  const latMax = Math.ceil((proj.centerLat + proj.halfLatSpan) / latStep) * latStep;
+  ctx.strokeStyle = '#262626';
+  ctx.lineWidth = Math.max(0.5, w * 0.0005);
+  ctx.beginPath();
+  for (let lon = lonMin; lon <= lonMax; lon += lonStep){
+    const [x] = projectLL(lon, proj.centerLat, w, h);
+    ctx.moveTo(x, 0); ctx.lineTo(x, h);
+  }
+  for (let lat = latMin; lat <= latMax; lat += latStep){
+    const [, y] = projectLL(proj.centerLon, lat, w, h);
+    ctx.moveTo(0, y); ctx.lineTo(w, y);
+  }
+  ctx.stroke();
+}
+
+/* ---------- Ground track drawing ---------- */
+
+// Three categories driving the polyline color:
+//   bad      — below the horizon threshold (we can't hear it)
+//   visible  — above threshold, but outside the recording window (e.g. trimmed
+//              by conflict resolution against a higher-priority sat)
+//   rec      — above threshold AND inside the recording window
+function recordingWindow(p){
+  const pi = p.pass_info;
+  const s = pi.recording_start_override || pi.start_time;
+  const e = pi.recording_end_override || pi.end_time;
+  return [+new Date(s), +new Date(e)];
+}
+
+function categorize(el, t, threshold, win){
+  if (el < threshold) return 'bad';
+  return (t >= win[0] && t <= win[1]) ? 'rec' : 'visible';
+}
+
+// Walk consecutive samples and emit (start, end, category) sub-segments,
+// inserting interpolated split points wherever the category changes within
+// a segment. With dense sampling each pair of samples will see at most one
+// boundary crossing in practice, but the loop handles up to two (threshold
+// + recording-window edge) cleanly.
+function colorSegments(prev, curr, threshold, win){
+  const ta = +prev.t, tb = +curr.t;
+  const events = [];
+  // Threshold crossing
+  if ((prev.el < threshold) !== (curr.el < threshold)){
+    const f = (threshold - prev.el) / (curr.el - prev.el);
+    if (f > 0 && f < 1) events.push(f);
+  }
+  // Recording-window start
+  if ((ta < win[0]) !== (tb < win[0]) && tb !== ta){
+    const f = (win[0] - ta) / (tb - ta);
+    if (f > 0 && f < 1) events.push(f);
+  }
+  // Recording-window end
+  if ((ta <= win[1]) !== (tb <= win[1]) && tb !== ta){
+    const f = (win[1] - ta) / (tb - ta);
+    if (f > 0 && f < 1) events.push(f);
+  }
+  events.sort((a, b) => a - b);
+  const points = [0, ...events, 1];
+  const segs = [];
+  for (let i = 0; i < points.length - 1; i++){
+    const f0 = points[i], f1 = points[i + 1];
+    const fm = (f0 + f1) / 2;
+    const elM = prev.el + (curr.el - prev.el) * fm;
+    const tM = ta + (tb - ta) * fm;
+    const cat = categorize(elM, tM, threshold, win);
+    segs.push({f0, f1, cat});
+  }
+  return segs;
+}
+
+function drawTrackLabel(ctx, p, samples, w, h, opts){
+  if (!samples || samples.length < 2) return;
+  // Anchor label at the max-elevation sample — the visually most prominent
+  // point of the track on a station-centered map, and the part the user
+  // most cares about.
+  let maxIdx = 0, maxEl = -Infinity;
+  for (let i = 0; i < samples.length; i++){
+    if (samples[i].el > maxEl){ maxEl = samples[i].el; maxIdx = i; }
+  }
+  const s = samples[maxIdx];
+  let [x, y] = projectLL(s.lon, s.lat, w, h);
+  const start = new Date(p.pass_info.start_time);
+  const tStr = start.toLocaleTimeString(undefined, {hour: '2-digit', minute: '2-digit', hour12: false});
+  const text = `${p.satellite.name} · ${tStr}`;
+
+  const fontPx = Math.max(11, Math.round(w * 0.012));
+  ctx.font = `${fontPx}px var(--font, sans-serif)`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+
+  // Clamp position so the label stays inside the canvas with a small margin.
+  const metrics = ctx.measureText(text);
+  const halfW = metrics.width / 2 + 4;
+  const padY = fontPx + 6;
+  x = Math.min(w - halfW, Math.max(halfW, x));
+  const yLabel = Math.min(h - 2, Math.max(padY, y - 10));
+
+  ctx.globalAlpha = opts.alpha;
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+  ctx.strokeText(text, x, yLabel);
+  ctx.fillStyle = opts.textColor || '#fff';
+  ctx.fillText(text, x, yLabel);
+
+  // Small dot at the actual anchor so the label is visually tied to the track.
+  const [ax, ay] = projectLL(s.lon, s.lat, w, h);
+  ctx.fillStyle = opts.textColor || '#fff';
+  ctx.beginPath();
+  ctx.arc(ax, ay, Math.max(2, w * 0.0025), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1.0;
+}
+
+function drawTrackPolyline(ctx, p, samples, w, h, threshold, opts){
+  if (!samples || samples.length < 2) return;
+  const win = recordingWindow(p);
+  ctx.lineWidth = opts.lineWidth;
+  ctx.globalAlpha = opts.alpha;
+  let prev = null;
+  for (let i = 0; i < samples.length; i++){
+    const s = samples[i];
+    const [x, y] = projectLL(s.lon, s.lat, w, h);
+    const cur = {x, y, lon: s.lon, lat: s.lat, el: s.el, t: s.t};
+    if (prev){
+      const segs = colorSegments(prev, cur, threshold, win);
+      for (const seg of segs){
+        const x0 = prev.x + (cur.x - prev.x) * seg.f0;
+        const y0 = prev.y + (cur.y - prev.y) * seg.f0;
+        const x1 = prev.x + (cur.x - prev.x) * seg.f1;
+        const y1 = prev.y + (cur.y - prev.y) * seg.f1;
+        ctx.strokeStyle = TRACK_COLORS[seg.cat];
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+      }
+    }
+    prev = cur;
+  }
+  ctx.globalAlpha = 1.0;
+}
+
+function footprintPolyline(lat0, lon0, alt_km, n){
+  const R = EARTH_R_KM;
+  const rho = Math.acos(R / (R + alt_km));
+  const lat0r = lat0 * Math.PI / 180;
+  const lon0r = lon0 * Math.PI / 180;
+  const out = [];
+  for (let i = 0; i <= n; i++){
+    const theta = (i / n) * Math.PI * 2;
+    const lat = Math.asin(Math.sin(lat0r) * Math.cos(rho) + Math.cos(lat0r) * Math.sin(rho) * Math.cos(theta));
+    const lon = lon0r + Math.atan2(
+      Math.sin(theta) * Math.sin(rho) * Math.cos(lat0r),
+      Math.cos(rho) - Math.sin(lat0r) * Math.sin(lat)
+    );
+    out.push([
+      ((lon * 180 / Math.PI + 540) % 360) - 180,
+      lat * 180 / Math.PI,
+    ]);
+  }
+  return out;
+}
+
+function drawFootprint(ctx, w, h, lat, lon, alt_km, color){
+  const ring = footprintPolyline(lat, lon, alt_km, 96);
+  ctx.strokeStyle = color + 'aa';
+  ctx.lineWidth = Math.max(1, w * 0.001);
+  ctx.beginPath();
+  for (let i = 0; i < ring.length; i++){
+    const [lonp, latp] = ring[i];
+    const [x, y] = projectLL(lonp, latp, w, h);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+}
+
+function drawStationMarker(ctx, w, h){
+  if (!state.station) return;
+  const [x, y] = projectLL(state.station.lon, state.station.lat, w, h);
+  const r = Math.max(3, w * 0.005);
+  ctx.fillStyle = '#00bcd4';
+  ctx.strokeStyle = '#fff';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(x, y - r);
+  ctx.lineTo(x - r, y + r);
+  ctx.lineTo(x + r, y + r);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+}
+
+function drawSatDot(ctx, w, h, lat, lon){
+  const [x, y] = projectLL(lon, lat, w, h);
+  const r = Math.max(3, w * 0.006);
+  ctx.fillStyle = '#fff';
+  ctx.strokeStyle = '#00bcd4';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+}
+
+/* ---------- Polar plot ---------- */
+
+function drawPolarPlot(ctx, w, h, samplesPass, samples, threshold, livePoint){
+  const cx = w / 2, cy = h / 2;
+  const radius = Math.min(w, h) * 0.45;
+  const fontPx = Math.max(10, radius * 0.08);
+  ctx.font = `${fontPx}px var(--font, sans-serif)`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // background dome + grid
+  ctx.fillStyle = '#1a1a1a';
+  ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI * 2); ctx.fill();
+
+  ctx.strokeStyle = '#2a2a2a';
+  ctx.lineWidth = Math.max(0.5, radius * 0.005);
+  for (const el of [0, 30, 60]){
+    const r = (1 - el / 90) * radius;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.strokeStyle = '#262626';
+  ctx.beginPath();
+  for (let a = 0; a < 360; a += 45){
+    const rad = (a - 90) * Math.PI / 180;
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(rad) * radius, cy + Math.sin(rad) * radius);
+  }
+  ctx.stroke();
+
+  // cardinal labels (plot is azimuth 0=N at top)
+  ctx.fillStyle = '#888';
+  const lpad = radius + fontPx * 0.9;
+  ctx.fillText('N', cx, cy - lpad);
+  ctx.fillText('S', cx, cy + lpad);
+  ctx.fillText('E', cx + lpad, cy);
+  ctx.fillText('W', cx - lpad, cy);
+
+  // threshold ring
+  if (threshold > 0 && threshold < 90){
+    const r = (1 - threshold / 90) * radius;
+    ctx.strokeStyle = '#555';
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  if (!samples || samples.length < 2 || !samplesPass) return;
+  function polarXY(az, el){
+    const r = (1 - el / 90) * radius;
+    const a = (az - 90) * Math.PI / 180;
+    return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+  }
+  const lineWidth = Math.max(2, radius * 0.025);
+  ctx.lineWidth = lineWidth;
+  const win = recordingWindow(samplesPass);
+  let prev = null;
+  for (let i = 0; i < samples.length; i++){
+    const s = samples[i];
+    if (s.el < 0){ prev = null; continue; }
+    const [x, y] = polarXY(s.az, Math.max(0, s.el));
+    const cur = {x, y, el: s.el, t: s.t};
+    if (prev){
+      const segs = colorSegments(prev, cur, threshold, win);
+      for (const seg of segs){
+        const x0 = prev.x + (cur.x - prev.x) * seg.f0;
+        const y0 = prev.y + (cur.y - prev.y) * seg.f0;
+        const x1 = prev.x + (cur.x - prev.x) * seg.f1;
+        const y1 = prev.y + (cur.y - prev.y) * seg.f1;
+        ctx.strokeStyle = TRACK_COLORS[seg.cat];
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+      }
+    }
+    prev = cur;
+  }
+  // start/end markers
+  const first = samples.find(s => s.el >= 0);
+  const last = [...samples].reverse().find(s => s.el >= 0);
+  if (first){
+    const [x, y] = polarXY(first.az, Math.max(0, first.el));
+    ctx.fillStyle = '#888'; ctx.beginPath(); ctx.arc(x, y, lineWidth*0.8, 0, Math.PI*2); ctx.fill();
+  }
+  if (last && last !== first){
+    const [x, y] = polarXY(last.az, Math.max(0, last.el));
+    ctx.fillStyle = '#aaa'; ctx.beginPath(); ctx.arc(x, y, lineWidth*0.8, 0, Math.PI*2); ctx.fill();
+  }
+  if (livePoint && livePoint.el >= 0){
+    const [x, y] = polarXY(livePoint.az, Math.max(0, livePoint.el));
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = '#00bcd4';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x, y, lineWidth*1.1, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+  }
+}
+
+/* ---------- Render orchestration ---------- */
+
+function passIsLive(p){
+  const s = +new Date(p.pass_info.start_time), e = +new Date(p.pass_info.end_time);
+  const now = Date.now();
+  return s <= now && now <= e;
+}
+
+function renderTrackingMap(ctx, w, h, mainPass, overlays){
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = '#161616'; ctx.fillRect(0, 0, w, h);
+  drawMapGrid(ctx, w, h);
+  drawCoastlines(ctx, w, h);
+
+  const labelJobs = [];
+
+  for (const op of overlays){
+    const samples = computeTrack(op);
+    if (!samples) continue;
+    drawTrackPolyline(ctx, op, samples, w, h, state.threshold_deg, {
+      lineWidth: Math.max(1, w * 0.002),
+      alpha: 0.28,
+    });
+    labelJobs.push({p: op, samples, alpha: 0.55, textColor: '#cfd8dc'});
+  }
+
+  drawStationMarker(ctx, w, h);
+
+  if (mainPass){
+    const samples = computeTrack(mainPass);
+    if (samples){
+      drawTrackPolyline(ctx, mainPass, samples, w, h, state.threshold_deg, {
+        lineWidth: Math.max(2, w * 0.0035),
+        alpha: 1.0,
+      });
+      if (passIsLive(mainPass)){
+        const sr = getSatrec(mainPass);
+        const sub = sr ? propagate(sr, new Date()) : null;
+        if (sub){
+          drawFootprint(ctx, w, h, sub.lat, sub.lon, sub.alt_km, '#00bcd4');
+          drawSatDot(ctx, w, h, sub.lat, sub.lon);
+        }
+      }
+      labelJobs.push({p: mainPass, samples, alpha: 1.0, textColor: '#fff'});
+    }
+  }
+
+  // Draw labels last so they sit on top of every polyline.
+  for (const job of labelJobs){
+    drawTrackLabel(ctx, job.p, job.samples, w, h, {alpha: job.alpha, textColor: job.textColor});
+  }
+}
+
+function renderTrackingPolar(ctx, w, h, mainPass){
+  ctx.clearRect(0, 0, w, h);
+  if (!mainPass){ drawPolarPlot(ctx, w, h, null, null, state.threshold_deg, null); return; }
+  const samples = computeTrack(mainPass);
+  let live = null;
+  if (samples && passIsLive(mainPass)){
+    const sr = getSatrec(mainPass);
+    const la = sr ? lookAngleAt(sr, new Date(), state.station) : null;
+    if (la) live = la;
+  }
+  drawPolarPlot(ctx, w, h, mainPass, samples, state.threshold_deg, live);
+}
+
+function updateTrackingCaption(mainPass){
+  const cap = document.getElementById('tracking-caption');
+  if (!mainPass){ cap.innerHTML = '<span class="dim">no pass selected</span>'; return; }
+  const start = new Date(mainPass.pass_info.start_time);
+  const end = new Date(mainPass.pass_info.end_time);
+  const isLive = passIsLive(mainPass);
+  const stateLabel = isLive ? '<b style="color:var(--live)">LIVE</b>' : (start > new Date() ? 'next' : 'past');
+  cap.innerHTML = `
+    <span><b>${escapeHtml(mainPass.satellite.name)}</b> · ${stateLabel}</span>
+    <span class="dim">${escapeHtml(start.toLocaleString(undefined,{hour12:false}))} → ${escapeHtml(end.toLocaleTimeString(undefined,{hour12:false}))} · max el ${mainPass.pass_info.max_elevation.toFixed(1)}°</span>
+  `;
+}
+
+let _redrawScheduled = false;
+function redrawTracking(){
+  if (_redrawScheduled) return;
+  _redrawScheduled = true;
+  requestAnimationFrame(() => {
+    _redrawScheduled = false;
+    const mapCanvas = document.getElementById('map-canvas');
+    const polarCanvas = document.getElementById('polar-canvas');
+    const m = fitCanvas(mapCanvas);
+    const pl = fitCanvas(polarCanvas);
+    const selectedId = effectiveSelectedPassId();
+    const mainPass = selectedId ? state.passes.find(p => p.id === selectedId) : null;
+    const overlays = pickOverlayPasses(selectedId);
+    if (m) renderTrackingMap(m.ctx, m.w, m.h, mainPass, overlays);
+    if (pl) renderTrackingPolar(pl.ctx, pl.w, pl.h, mainPass);
+    updateTrackingCaption(mainPass);
+    // also redraw the modal's polar plot if open and on the same pass
+    if (modalState.openPassId && modalState.openPassId === (mainPass && mainPass.id)){
+      redrawModalPolar();
+    }
+  });
+}
+
+const trackingResizeObserver = new ResizeObserver(() => redrawTracking());
+trackingResizeObserver.observe(document.getElementById('map-canvas'));
+trackingResizeObserver.observe(document.getElementById('polar-canvas'));
+window.addEventListener('orientationchange', () => redrawTracking());
+
+/* Live tick — only repaints when there's a live pass to keep the dot moving. */
+setInterval(() => {
+  const sel = effectiveSelectedPassId();
+  const p = sel ? state.passes.find(x => x.id === sel) : null;
+  if (p && passIsLive(p)) redrawTracking();
+}, LIVE_TICK_MS);
+
+// 1Hz countdown refresh. Surgical updates only — the .live pulse animation
+// keeps running because we don't replace the row elements.
+setInterval(tickPasses, 1000);
+
+/* ---------- Pass detail modal ---------- */
+
+const modalState = { openPassId: null, polarObserver: null };
+
+function openPassModal(pass){
+  closePassModal();
+  modalState.openPassId = pass.id;
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'modal-backdrop';
+  backdrop.id = 'pass-modal';
+
+  const sat = pass.satellite;
+  const pi = pass.pass_info;
+  const start = new Date(pi.start_time), end = new Date(pi.end_time);
+  const dirStart = compass(pi.start_azimuth), dirEnd = compass(pi.end_azimuth);
+  const trimmed = pi.recording_start_override || pi.recording_end_override;
+  let recRow = '';
+  if (trimmed){
+    const recS = new Date(pi.recording_start_override || pi.start_time);
+    const recE = new Date(pi.recording_end_override || pi.end_time);
+    recRow = `<span class="k">Recording</span><span style="color:var(--track-rec)">${escapeHtml(recS.toLocaleString(undefined,{hour12:false}))} → ${escapeHtml(recE.toLocaleTimeString(undefined,{hour12:false}))} <span class="dim">(trimmed for higher-priority pass)</span></span>`;
+  }
+  const waterfallHtml = pass.has_waterfall
+    ? `<div class="modal-waterfall"><img src="/waterfalls/${encodeURIComponent(pass.id)}.png" alt="waterfall for ${escapeHtml(sat.name)}" loading="lazy"></div>`
+    : `<div class="modal-waterfall-missing">No waterfall available for this pass yet.</div>`;
+
+  backdrop.innerHTML = `
+    <div class="modal-card" role="dialog" aria-modal="true" aria-label="Pass details">
+      <div class="modal-header">
+        <h3>${escapeHtml(sat.name)} · ${escapeHtml(start.toLocaleString(undefined,{hour12:false}))}</h3>
+        <button class="modal-close" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-polar-wrap"><canvas id="modal-polar-canvas"></canvas></div>
+        <div class="modal-stats">
+          <span class="k">Status</span><span><span class="status-pill status-${escapeHtml(pass.status)}">${escapeHtml(pass.status)}</span></span>
+          <span class="k">Start</span><span>${escapeHtml(start.toLocaleString(undefined,{hour12:false}))} (${dirStart})</span>
+          <span class="k">End</span><span>${escapeHtml(end.toLocaleString(undefined,{hour12:false}))} (${dirEnd})</span>
+          <span class="k">Duration</span><span>${pi.duration_minutes.toFixed(2)} min</span>
+          ${recRow}
+          <span class="k">Max elevation</span><span>${pi.max_elevation.toFixed(2)}° (az ${pi.max_azimuth.toFixed(0)}°)</span>
+          <span class="k">Frequency</span><span>${(sat.frequency/1e6).toFixed(4)} MHz</span>
+          <span class="k">Bandwidth</span><span>${(sat.bandwidth/1e3).toFixed(1)} kHz</span>
+          <span class="k">NORAD</span><span>${escapeHtml(sat.norad)}</span>
+        </div>
+        ${waterfallHtml}
+      </div>
+    </div>`;
+  document.body.appendChild(backdrop);
+
+  backdrop.addEventListener('click', e => { if (e.target === backdrop) closePassModal(); });
+  backdrop.querySelector('.modal-close').addEventListener('click', closePassModal);
+  document.addEventListener('keydown', escClose);
+
+  const canvas = backdrop.querySelector('#modal-polar-canvas');
+  modalState.polarObserver = new ResizeObserver(redrawModalPolar);
+  modalState.polarObserver.observe(canvas);
+  redrawModalPolar();
+}
+
+function escClose(e){ if (e.key === 'Escape') closePassModal(); }
+
+function closePassModal(){
+  const el = document.getElementById('pass-modal');
+  if (el) el.remove();
+  document.removeEventListener('keydown', escClose);
+  if (modalState.polarObserver){ modalState.polarObserver.disconnect(); modalState.polarObserver = null; }
+  modalState.openPassId = null;
+}
+
+function redrawModalPolar(){
+  const canvas = document.getElementById('modal-polar-canvas');
+  if (!canvas) return;
+  const fit = fitCanvas(canvas);
+  if (!fit) return;
+  const p = modalState.openPassId ? state.passes.find(x => x.id === modalState.openPassId) : null;
+  if (!p){ fit.ctx.clearRect(0, 0, fit.w, fit.h); return; }
+  renderTrackingPolar(fit.ctx, fit.w, fit.h, p);
+}
+
+/* ---------- WebSocket ---------- */
+
 let ws;
 let retry = 500;
 function connect(){
@@ -384,9 +1243,9 @@ function connect(){
   ws.onclose = () => { setTimeout(() => { retry = Math.min(retry * 2, 30000); connect(); }, retry); };
   ws.onerror = () => { try { ws.close(); } catch {} };
 }
+
+loadCoastlines().then(() => redrawTracking());
 connect();
-// Repaint passes every 5s so "LIVE"/"ended" transitions advance with wall-clock time.
-setInterval(renderPasses, 5000);
 </script>
 </body>
 </html>

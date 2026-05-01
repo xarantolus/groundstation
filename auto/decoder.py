@@ -21,6 +21,7 @@ from .models import (
 from .podman import DECODER_KILLED_BY_STOP, DEFAULT_DECODER_TIMEOUT_MINUTES, filter_decoder_outputs, run_decoder
 from .state import StateStore
 from .transfer import CompressionInterrupted, compress_file
+from .waterfall_store import WATERFALL_FILENAME, WaterfallStore
 
 logger = logging.getLogger("groundstation.decoder")
 _decoder_output_logger = logging.getLogger("groundstation.decoders.output")
@@ -51,12 +52,14 @@ class DecoderService:
         state: StateStore,
         gate: DecodeGate,
         passes: Dict[str, Pass],
+        waterfalls: WaterfallStore,
     ) -> None:
         self._cfg = cfg
         self._bus = bus
         self._state = state
         self._gate = gate
         self._passes = passes
+        self._waterfalls = waterfalls
         self._queue: Deque[Tuple[str, int, int]] = collections.deque()
         self._in_queue: Set[Tuple[str, int]] = set()
         self._wakeup = asyncio.Event()
@@ -369,6 +372,17 @@ class DecoderService:
                 )
             )
         else:
+            # Copy the waterfall PNG into the persistent store before
+            # TransferService takes ownership of the source path and
+            # eventually deletes it post-upload. The web UI reads from this
+            # store so users can review the spectrogram of recent passes.
+            waterfall_persisted = False
+            for out_path in surviving:
+                if os.path.basename(out_path) == WATERFALL_FILENAME:
+                    if self._waterfalls.persist(pass_id, out_path) is not None:
+                        waterfall_persisted = True
+                    break
+
             # Persist the transfer requests FIRST — before marking the
             # decoder done and tombstoning its queue entry. A crash in the
             # middle then leaves the decoder queue intact (work will re-run,
@@ -404,6 +418,12 @@ class DecoderService:
                     outputs=rels,
                 )
             )
+            if waterfall_persisted:
+                # Re-broadcast the passes table so connected clients learn
+                # has_waterfall just flipped to true for this pass.
+                await self._bus.publish(
+                    E.PassesTableChanged(passes=list(self._passes.values()))
+                )
 
         if self._all_decoders_settled(p) and p.id not in self._cleanup_launched:
             # Cleanup (incl. waiting up to 30 minutes for the IQ upload) must

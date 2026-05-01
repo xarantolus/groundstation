@@ -28,6 +28,7 @@ from .state import StateStore
 from .transfer import TransferService
 from .tui import TUIService
 from .view import ViewModel
+from .waterfall_store import WaterfallStore
 from .web import WebService
 
 from typing import Optional
@@ -276,6 +277,7 @@ async def _run(cfg: GroundstationConfig, no_tui: bool) -> None:
     _attach_bus_logging(bus, loop)
 
     state = StateStore("state")
+    waterfalls = WaterfallStore("state")
     view = ViewModel()
 
     passes_by_id, extra_transfers = _boot_recovery(cfg, state)
@@ -314,9 +316,9 @@ async def _run(cfg: GroundstationConfig, no_tui: bool) -> None:
 
     scheduler = SchedulerService(cfg, bus, state, predictor, gate, passes_by_id)
     recorder = RecorderService(cfg, bus, state)
-    decoder = DecoderService(cfg, bus, state, gate, passes_by_id)
+    decoder = DecoderService(cfg, bus, state, gate, passes_by_id, waterfalls)
     transfer = TransferService(cfg, bus, state, gate=gate)
-    web_service = WebService(cfg, bus, view)
+    web_service = WebService(cfg, bus, view, waterfalls)
 
     # Push recovered passes into view so UIs have something to show immediately
     if passes_by_id:

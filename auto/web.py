@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
-from typing import List
+from typing import Any, Dict, List
 
 import aiohttp
 from aiohttp import web
@@ -13,22 +14,35 @@ from . import events as E
 from .bus import EventBus, run_subscriber
 from .models import GroundstationConfig
 from .view import ViewModel
+from .waterfall_store import WaterfallStore
 
 logger = logging.getLogger("groundstation.web")
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
+STATIC_DIR = Path(__file__).parent / "static"
+
+_SAFE_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 class WebService:
-    def __init__(self, cfg: GroundstationConfig, bus: EventBus, view: ViewModel) -> None:
+    def __init__(
+        self,
+        cfg: GroundstationConfig,
+        bus: EventBus,
+        view: ViewModel,
+        waterfalls: WaterfallStore,
+    ) -> None:
         self._cfg = cfg
         self._bus = bus
         self._view = view
+        self._waterfalls = waterfalls
         self._sockets: List[web.WebSocketResponse] = []
         self._stop = asyncio.Event()
         self._app = web.Application()
         self._app.router.add_get("/", self._index)
         self._app.router.add_get("/ws", self._ws)
+        self._app.router.add_get("/static/{name}", self._static)
+        self._app.router.add_get("/waterfalls/{pass_id}.png", self._waterfall)
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
         self._index_html: str = ""
@@ -84,14 +98,27 @@ class WebService:
     def stop(self) -> None:
         self._stop.set()
 
+    def _decorate_pass(self, pass_dict: Dict[str, Any]) -> None:
+        pid = pass_dict.get("id")
+        pass_dict["has_waterfall"] = bool(pid) and self._waterfalls.has(pid)
+
+    def _decorate_event_payload(self, event_dict: Dict[str, Any]) -> None:
+        if "pass" in event_dict and isinstance(event_dict["pass"], dict):
+            self._decorate_pass(event_dict["pass"])
+        passes = event_dict.get("passes")
+        if isinstance(passes, list):
+            for p in passes:
+                if isinstance(p, dict):
+                    self._decorate_pass(p)
+
     async def _broadcast_event(self, event: E.Event) -> None:
         if not self._sockets:
             return
-        payload = {"kind": "event", "event": event.model_dump(mode="json", by_alias=True)}
+        event_dict = event.model_dump(mode="json", by_alias=True)
+        self._decorate_event_payload(event_dict)
+        payload = {"kind": "event", "event": event_dict}
         message = json.dumps(payload, default=str)
         stale: List[web.WebSocketResponse] = []
-        # Snapshot — new clients can connect mid-broadcast and mutations to
-        # the underlying list would otherwise skip/repeat entries.
         for ws in list(self._sockets):
             if ws.closed:
                 stale.append(ws)
@@ -112,14 +139,39 @@ class WebService:
     async def _index(self, request: web.Request) -> web.Response:
         return web.Response(text=self._index_html, content_type="text/html")
 
+    async def _static(self, request: web.Request) -> web.StreamResponse:
+        name = request.match_info["name"]
+        if not _SAFE_NAME.match(name):
+            raise web.HTTPNotFound()
+        path = STATIC_DIR / name
+        if not path.is_file():
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
+
+    async def _waterfall(self, request: web.Request) -> web.StreamResponse:
+        pass_id = request.match_info["pass_id"]
+        if not _SAFE_NAME.match(pass_id):
+            raise web.HTTPNotFound()
+        path = self._waterfalls.path_for(pass_id)
+        if path is None:
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
+
     async def _ws(self, request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse(heartbeat=30.0)
         await ws.prepare(request)
         self._sockets.append(ws)
-        snapshot = {
-            "kind": "snapshot",
-            "snapshot": self._view.snapshot().model_dump(mode="json"),
+        snap = self._view.snapshot().model_dump(mode="json")
+        for p in snap.get("passes", []):
+            if isinstance(p, dict):
+                self._decorate_pass(p)
+        snap["station"] = {
+            "lat": self._cfg.location_lat,
+            "lon": self._cfg.location_lon,
+            "alt_m": self._cfg.location_alt,
         }
+        snap["pass_elevation_threshold_deg"] = self._cfg.pass_elevation_threshold_deg
+        snapshot = {"kind": "snapshot", "snapshot": snap}
         try:
             await ws.send_str(json.dumps(snapshot, default=str))
         except Exception:
