@@ -26,6 +26,8 @@
   #transfers{grid-column:2/3}
   #decoder{grid-column:1/-1}
   #logs{grid-column:1/-1}
+  #passes .card-body,#transfers .card-body{max-height:36vh}
+  #decoder .card-body,#logs .card-body{max-height:30vh}
 
   /* Mobile / narrow viewport: stack everything vertically. */
   @media (max-width:1024px){
@@ -40,10 +42,10 @@
   .tracking-grid{display:grid;gap:12px;grid-template-columns:2fr 1fr;align-items:start}
   @media (max-width:1024px){.tracking-grid{grid-template-columns:1fr}}
   .map-wrap,.polar-wrap{position:relative;width:100%;background:var(--surface2);border-radius:6px;overflow:hidden}
-  .map-wrap{aspect-ratio:1.6/1;max-height:60vh}
-  .polar-wrap{aspect-ratio:1/1;max-height:60vh;max-width:60vh;justify-self:center}
+  .map-wrap{aspect-ratio:2/1;max-height:45vh}
+  .polar-wrap{aspect-ratio:1/1;max-height:45vh;max-width:45vh;justify-self:center}
   @media (max-width:1024px){
-    .map-wrap{aspect-ratio:4/3;max-height:60vh}
+    .map-wrap{aspect-ratio:4/3;max-height:55vh}
     .polar-wrap{max-height:55vh;max-width:min(85vw,28rem)}
   }
   .map-wrap canvas,.polar-wrap canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
@@ -159,9 +161,13 @@ const compass = az => COMPASS[Math.floor((((az+22.5)%360)+360)%360/45)];
 const DECODER_LOG_CAP = 300;
 const MAIN_LOG_CAP = 500;
 const LIVE_TICK_MS = 1000;
-const TRACK_SAMPLES = 120;
+const TRACK_SAMPLES = 160;
 const EARTH_R_KM = 6378.137;
 const MAP_WIDTH_KM = 10000;    // visible width of the regional map, centered on station
+// Extend the drawn track outside the in-horizon window so the user can see
+// the satellite approach (red lead-in) and depart (red trail-out).
+const TRACK_LEAD_MS = 6 * 60 * 1000;
+const TRACK_TRAIL_MS = 3 * 60 * 1000;
 const TRACK_COLORS = { rec: '#00e676', visible: '#42a5f5', bad: '#f44336' };
 
 const state = {
@@ -558,8 +564,8 @@ function computeTrack(p){
   if (cached && cached.station_key === skey) return cached.samples;
   const sr = getSatrec(p);
   if (!sr) return null;
-  const t0 = new Date(p.pass_info.start_time).getTime();
-  const t1 = new Date(p.pass_info.end_time).getTime();
+  const t0 = new Date(p.pass_info.start_time).getTime() - TRACK_LEAD_MS;
+  const t1 = new Date(p.pass_info.end_time).getTime() + TRACK_TRAIL_MS;
   if (!(t1 > t0)) return null;
   const samples = [];
   for (let i = 0; i <= TRACK_SAMPLES; i++){
@@ -873,9 +879,21 @@ function drawTrackPolyline(ctx, p, samples, w, h, threshold, opts){
   ctx.globalAlpha = 1.0;
 }
 
-function footprintPolyline(lat0, lon0, alt_km, n){
-  const R = EARTH_R_KM;
-  const rho = Math.acos(R / (R + alt_km));
+// Angular radius (radians) on the Earth's surface where the satellite at
+// altitude `alt_km` appears at exactly `elevationDeg`. Solved from
+//   cos(ρ) = k·cos²(el) + sin(el)·√(1 − k²·cos²(el))    with k = R/(R+h)
+// At el=0° this collapses to acos(R/(R+h)) (the geometric horizon ring);
+// at higher el the ring shrinks toward the subpoint.
+function footprintAngularRadius(alt_km, elevationDeg){
+  const k = EARTH_R_KM / (EARTH_R_KM + alt_km);
+  const el = (elevationDeg || 0) * Math.PI / 180;
+  const ce = Math.cos(el), se = Math.sin(el);
+  const cosRho = k * ce * ce + se * Math.sqrt(Math.max(0, 1 - k * k * ce * ce));
+  return Math.acos(Math.min(1, Math.max(-1, cosRho)));
+}
+
+function footprintPolyline(lat0, lon0, alt_km, n, elevationDeg){
+  const rho = footprintAngularRadius(alt_km, elevationDeg);
   const lat0r = lat0 * Math.PI / 180;
   const lon0r = lon0 * Math.PI / 180;
   const out = [];
@@ -894,8 +912,8 @@ function footprintPolyline(lat0, lon0, alt_km, n){
   return out;
 }
 
-function drawFootprint(ctx, w, h, lat, lon, alt_km, color){
-  const ring = footprintPolyline(lat, lon, alt_km, 96);
+function drawFootprint(ctx, w, h, lat, lon, alt_km, color, elevationDeg){
+  const ring = footprintPolyline(lat, lon, alt_km, 96, elevationDeg);
   ctx.strokeStyle = color + 'aa';
   ctx.lineWidth = Math.max(1, w * 0.001);
   ctx.beginPath();
@@ -1035,6 +1053,13 @@ function passIsLive(p){
   return s <= now && now <= e;
 }
 
+function passInExtendedWindow(p){
+  const s = +new Date(p.pass_info.start_time) - TRACK_LEAD_MS;
+  const e = +new Date(p.pass_info.end_time) + TRACK_TRAIL_MS;
+  const now = Date.now();
+  return s <= now && now <= e;
+}
+
 function renderTrackingMap(ctx, w, h, mainPass, overlays){
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = '#161616'; ctx.fillRect(0, 0, w, h);
@@ -1062,11 +1087,13 @@ function renderTrackingMap(ctx, w, h, mainPass, overlays){
         lineWidth: Math.max(2, w * 0.0035),
         alpha: 1.0,
       });
-      if (passIsLive(mainPass)){
+      if (passInExtendedWindow(mainPass)){
         const sr = getSatrec(mainPass);
         const sub = sr ? propagate(sr, new Date()) : null;
         if (sub){
-          drawFootprint(ctx, w, h, sub.lat, sub.lon, sub.alt_km, '#00bcd4');
+          // Footprint at our actual horizon threshold so the ring matches
+          // where the track flips red/green, not the geometric 0° horizon.
+          drawFootprint(ctx, w, h, sub.lat, sub.lon, sub.alt_km, '#00bcd4', state.threshold_deg);
           drawSatDot(ctx, w, h, sub.lat, sub.lon);
         }
       }
@@ -1134,11 +1161,13 @@ trackingResizeObserver.observe(document.getElementById('map-canvas'));
 trackingResizeObserver.observe(document.getElementById('polar-canvas'));
 window.addEventListener('orientationchange', () => redrawTracking());
 
-/* Live tick — only repaints when there's a live pass to keep the dot moving. */
+/* Live tick — repaints during the extended pass window (lead-in / trail-out
+ * included) so the satellite dot + footprint advance even before the pass
+ * formally starts and after it ends. */
 setInterval(() => {
   const sel = effectiveSelectedPassId();
   const p = sel ? state.passes.find(x => x.id === sel) : null;
-  if (p && passIsLive(p)) redrawTracking();
+  if (p && passInExtendedWindow(p)) redrawTracking();
 }, LIVE_TICK_MS);
 
 // 1Hz countdown refresh. Surgical updates only — the .live pulse animation
