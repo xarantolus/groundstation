@@ -236,7 +236,10 @@ function renderPasses(){
   if (!state.passes.length){ body.innerHTML = '<tr><td colspan="6" class="dim">No upcoming overpasses.</td></tr>'; return; }
   const past = state.passes.filter(p => new Date(p.pass_info.end_time) <= now);
   const future = state.passes.filter(p => new Date(p.pass_info.end_time) > now);
-  const display = past.slice(-1).concat(future).slice(0, 15);
+  // Keep the last 3 finished passes visible — that's the LRU window the
+  // backend retains waterfalls for, so the user can still click those rows
+  // and review their spectrograms.
+  const display = past.slice(-3).concat(future).slice(0, 15);
   const selectedId = effectiveSelectedPassId();
   const rows = display.map(p => {
     const start = new Date(p.pass_info.start_time);
