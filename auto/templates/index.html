@@ -587,12 +587,18 @@ function computeTrack(p){
 /* ---------- Selected pass / overlay picker ---------- */
 
 function effectiveSelectedPassId(){
+  const now = Date.now();
   if (state.selected_pass_id){
     const exists = state.passes.find(x => x.id === state.selected_pass_id);
-    if (exists) return state.selected_pass_id;
+    // Honour the manual pin only while it's still relevant (within trail-out).
+    // Once a pinned pass ages past that window, drop the pin so the auto-pick
+    // can promote whatever is live or coming up next.
+    if (exists){
+      const trailEnd = +new Date(exists.pass_info.end_time) + TRACK_TRAIL_MS;
+      if (trailEnd >= now) return state.selected_pass_id;
+    }
+    state.selected_pass_id = null;
   }
-  // auto: live pass first, else next upcoming
-  const now = Date.now();
   const live = state.passes.find(p => {
     const s = +new Date(p.pass_info.start_time), e = +new Date(p.pass_info.end_time);
     return s <= now && now <= e;
@@ -1160,6 +1166,11 @@ const trackingResizeObserver = new ResizeObserver(() => redrawTracking());
 trackingResizeObserver.observe(document.getElementById('map-canvas'));
 trackingResizeObserver.observe(document.getElementById('polar-canvas'));
 window.addEventListener('orientationchange', () => redrawTracking());
+// rAF is paused for backgrounded tabs which can leave the live dot stale
+// when the user comes back. Force a redraw on visibility regain.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) redrawTracking();
+});
 
 /* Live tick — repaints during the extended pass window (lead-in / trail-out
  * included) so the satellite dot + footprint advance even before the pass
