@@ -692,8 +692,8 @@ async function loadCoastlines(){
 function drawCoastlines(ctx, w, h){
   const gj = state.coastlines;
   if (!gj || !gj.features) return;
-  ctx.strokeStyle = '#3a3a3a';
-  ctx.lineWidth = Math.max(0.5, w * 0.0012);
+  ctx.strokeStyle = '#7a8a96';
+  ctx.lineWidth = Math.max(1.0, w * 0.0015);
   ctx.beginPath();
   for (const feat of gj.features){
     const geom = feat.geometry;
@@ -726,8 +726,8 @@ function pickGridStep(spanDeg){
 function drawMapGrid(ctx, w, h){
   const proj = regionalProjection(w, h);
   if (!proj){
-    ctx.strokeStyle = '#262626';
-    ctx.lineWidth = Math.max(0.5, w * 0.0005);
+    ctx.strokeStyle = '#3a4045';
+    ctx.lineWidth = Math.max(0.7, w * 0.0006);
     ctx.beginPath();
     for (let lon = -150; lon <= 150; lon += 30){
       const [x] = projectLL(lon, 0, w, h);
@@ -746,8 +746,8 @@ function drawMapGrid(ctx, w, h){
   const lonMax = Math.ceil((proj.centerLon + proj.halfLonSpan) / lonStep) * lonStep;
   const latMin = Math.floor((proj.centerLat - proj.halfLatSpan) / latStep) * latStep;
   const latMax = Math.ceil((proj.centerLat + proj.halfLatSpan) / latStep) * latStep;
-  ctx.strokeStyle = '#262626';
-  ctx.lineWidth = Math.max(0.5, w * 0.0005);
+  ctx.strokeStyle = '#3a4045';
+  ctx.lineWidth = Math.max(0.7, w * 0.0006);
   ctx.beginPath();
   for (let lon = lonMin; lon <= lonMax; lon += lonStep){
     const [x] = projectLL(lon, proj.centerLat, w, h);
