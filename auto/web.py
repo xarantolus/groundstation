@@ -13,6 +13,7 @@ from aiohttp import web
 from . import events as E
 from .bus import EventBus, run_subscriber
 from .models import GroundstationConfig
+from .skymap import SkymapService
 from .view import ViewModel
 from .waterfall_store import WaterfallStore
 
@@ -31,11 +32,13 @@ class WebService:
         bus: EventBus,
         view: ViewModel,
         waterfalls: WaterfallStore,
+        skymap: SkymapService,
     ) -> None:
         self._cfg = cfg
         self._bus = bus
         self._view = view
         self._waterfalls = waterfalls
+        self._skymap = skymap
         self._sockets: List[web.WebSocketResponse] = []
         self._stop = asyncio.Event()
         self._app = web.Application()
@@ -43,12 +46,17 @@ class WebService:
         self._app.router.add_get("/ws", self._ws)
         self._app.router.add_get("/static/{name}", self._static)
         self._app.router.add_get("/waterfalls/{pass_id}.png", self._waterfall)
+        self._app.router.add_get("/skymap", self._skymap_page)
+        self._app.router.add_get("/api/skymap", self._api_skymap)
+        self._app.router.add_get("/api/skymap/tracks", self._api_skymap_tracks)
         self._runner: web.AppRunner | None = None
         self._site: web.TCPSite | None = None
         self._index_html: str = ""
+        self._skymap_html: str = ""
 
     async def run(self) -> None:
         self._index_html = (TEMPLATE_DIR / "index.html").read_text(encoding="utf-8")
+        self._skymap_html = (TEMPLATE_DIR / "skymap.html").read_text(encoding="utf-8")
         self._runner = web.AppRunner(self._app, access_log=None)
         await self._runner.setup()
         self._site = web.TCPSite(self._runner, self._cfg.web_host, self._cfg.web_port)
@@ -75,6 +83,7 @@ class WebService:
             E.TransferCompleted,
             E.TransferFailed,
             E.LogMessage,
+            E.SkymapUpdated,
             name="web.events",
             queue_size=2048,
             overflow="drop_oldest",
@@ -156,6 +165,32 @@ class WebService:
         if path is None:
             raise web.HTTPNotFound()
         return web.FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
+
+    async def _skymap_page(self, request: web.Request) -> web.Response:
+        return web.Response(text=self._skymap_html, content_type="text/html")
+
+    async def _api_skymap(self, request: web.Request) -> web.Response:
+        sat = request.query.get("satellite") or None
+        payload = self._skymap.aggregate(satellite=sat)
+        payload["station"] = {
+            "lat": self._cfg.location_lat,
+            "lon": self._cfg.location_lon,
+            "alt_m": self._cfg.location_alt,
+        }
+        payload["pass_elevation_threshold_deg"] = (
+            self._cfg.pass_elevation_threshold_deg
+        )
+        return web.json_response(payload, dumps=lambda o: json.dumps(o, default=str))
+
+    async def _api_skymap_tracks(self, request: web.Request) -> web.Response:
+        sat = request.query.get("satellite") or None
+        try:
+            limit = int(request.query.get("limit", "30"))
+        except ValueError:
+            limit = 30
+        limit = max(1, min(limit, 200))
+        tracks = self._skymap.recent_tracks(satellite=sat, limit=limit)
+        return web.json_response({"tracks": tracks}, dumps=lambda o: json.dumps(o, default=str))
 
     async def _ws(self, request: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse(heartbeat=30.0)

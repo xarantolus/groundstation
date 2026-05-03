@@ -159,6 +159,17 @@ class ShutdownRequested(_EventBase):
     type: Literal["shutdown_requested"] = "shutdown_requested"
 
 
+class IqConsumerSettled(_EventBase):
+    type: Literal["iq_consumer_settled"] = "iq_consumer_settled"
+    pass_id: str
+    consumer_name: str
+
+
+class SkymapUpdated(_EventBase):
+    type: Literal["skymap_updated"] = "skymap_updated"
+    pass_id: str
+
+
 Event = Union[
     PassPredicted,
     PassesTableChanged,
@@ -182,4 +193,6 @@ Event = Union[
     TransferFailed,
     LogMessage,
     ShutdownRequested,
+    IqConsumerSettled,
+    SkymapUpdated,
 ]

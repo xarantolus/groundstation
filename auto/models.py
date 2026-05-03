@@ -108,6 +108,11 @@ class Pass(BaseModel):
     decoders_pending: List[int] = Field(default_factory=list)
     decoders_done: List[int] = Field(default_factory=list)
     decoders_failed: List[int] = Field(default_factory=list)
+    # Non-decoder consumers of the IQ recording (e.g. the skymap analyzer).
+    # `_after_all_decoders` waits for both decoders and consumers before
+    # compressing/deleting recording.bin.
+    iq_consumers_pending: List[str] = Field(default_factory=list)
+    iq_consumers_done: List[str] = Field(default_factory=list)
     iq_upload_confirmed: bool = False
     interrupted: bool = False
     created_at: datetime.datetime = Field(default_factory=datetime.datetime.now)
@@ -172,3 +177,4 @@ class GroundstationConfig(BaseModel):
     web_host: str = "0.0.0.0"
     web_port: int = 80
     n2yo_api_key: str | None = None
+    skymap_retention_days: float = 14.0

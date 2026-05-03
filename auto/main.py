@@ -24,6 +24,7 @@ from .models import GroundstationConfig, Pass, PassStatus, TransferRequest, shou
 from .pass_predictor import PassPredictor
 from .recorder import RecorderService
 from .scheduler import SchedulerService
+from .skymap import CONSUMER_NAME as SKYMAP_CONSUMER, SkymapService
 from .state import StateStore
 from .transfer import TransferService
 from .tui import TUIService
@@ -282,6 +283,24 @@ async def _run(cfg: GroundstationConfig, no_tui: bool) -> None:
 
     passes_by_id, extra_transfers = _boot_recovery(cfg, state)
 
+    # Sweep IQ-consumer orphans: if a previously-registered consumer is no
+    # longer running (config disabled, code removed), passes carrying its
+    # name in iq_consumers_pending would block IQ release forever.
+    registered_iq_consumers = {SKYMAP_CONSUMER}
+    orphan_count = 0
+    for p in passes_by_id.values():
+        orphans = [n for n in p.iq_consumers_pending if n not in registered_iq_consumers]
+        if not orphans:
+            continue
+        for n in orphans:
+            p.iq_consumers_pending.remove(n)
+            if n not in p.iq_consumers_done:
+                p.iq_consumers_done.append(n)
+        state.save_pass(p)
+        orphan_count += len(orphans)
+    if orphan_count:
+        logger.info("boot recovery: released %d orphan IQ consumer slot(s)", orphan_count)
+
     dropped_transfers = state.compact_transfer_queue()
     dropped_decodes = state.compact_decode_queue()
     dropped_completed = state.compact_completed(keep_last=200)
@@ -316,15 +335,24 @@ async def _run(cfg: GroundstationConfig, no_tui: bool) -> None:
 
     scheduler = SchedulerService(cfg, bus, state, predictor, gate, passes_by_id)
     recorder = RecorderService(cfg, bus, state)
-    decoder = DecoderService(cfg, bus, state, gate, passes_by_id, waterfalls)
+    decoder = DecoderService(
+        cfg,
+        bus,
+        state,
+        gate,
+        passes_by_id,
+        waterfalls,
+        iq_consumers=sorted(registered_iq_consumers),
+    )
+    skymap = SkymapService(cfg, bus, state, passes_by_id)
     transfer = TransferService(cfg, bus, state, gate=gate)
-    web_service = WebService(cfg, bus, view, waterfalls)
+    web_service = WebService(cfg, bus, view, waterfalls, skymap)
 
     # Push recovered passes into view so UIs have something to show immediately
     if passes_by_id:
         await bus.publish(E.PassesTableChanged(passes=list(passes_by_id.values())))
 
-    services: List = [scheduler, recorder, decoder, transfer, web_service]
+    services: List = [scheduler, recorder, decoder, skymap, transfer, web_service]
     if not no_tui:
         services.append(TUIService(bus, view))
 

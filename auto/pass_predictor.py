@@ -338,6 +338,29 @@ def prioritize(
     return picked
 
 
+def compute_azel(
+    tle1: str,
+    tle2: str,
+    lat: float,
+    lon: float,
+    alt_m: float,
+    when: datetime.datetime,
+) -> Tuple[float, float]:
+    """Compute (azimuth, elevation) in degrees of the satellite described by
+    ``(tle1, tle2)`` as seen from the observer at the given time."""
+    observer = ephem.Observer()
+    observer.lat = str(lat)
+    observer.lon = str(lon)
+    observer.elev = alt_m / 1000
+    observer.horizon = "0"
+    observer.date = ephem.Date(when)
+    sat_body = ephem.readtle("sat", tle1, tle2)
+    sat_body.compute(observer)
+    az = float(sat_body.az) * 180 / ephem.pi
+    el = float(sat_body.alt) * 180 / ephem.pi
+    return az, el
+
+
 def azimuth_to_compass(azimuth: float) -> str:
     sectors = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
     idx = int(((azimuth + 22.5) % 360) / 45)

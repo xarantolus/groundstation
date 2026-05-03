@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Skymap — Groundstation</title>
+<style>
+  :root{
+    --bg:#121212;--surface:#1e1e1e;--surface2:#2c2c2c;
+    --text:#e0e0e0;--text2:#a0a0a0;
+    --accent:#00bcd4;--live:#00e676;--warn:#ff9800;--err:#f44336;
+    --border:#333;
+    --font:'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+    --mono:'Consolas','Monaco',monospace;
+  }
+  body{background:var(--bg);color:var(--text);font-family:var(--font);margin:0;padding:16px;font-size:14px}
+  .wrap{max-width:1400px;margin:0 auto}
+  .topnav{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;color:var(--text2)}
+  .topnav a{color:var(--accent);text-decoration:none}
+  .topnav a:hover{text-decoration:underline}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:14px}
+  .card h2{font-size:.95em;letter-spacing:.04em;text-transform:uppercase;color:var(--accent);margin:0 0 10px 0;border-bottom:1px solid var(--border);padding-bottom:8px;font-weight:600}
+  .controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px;color:var(--text2)}
+  .controls label{display:inline-flex;align-items:center;gap:6px}
+  .controls select,.controls input{background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 6px;font-family:var(--font);font-size:.95em}
+  .stat-row{display:flex;flex-wrap:wrap;gap:18px;margin-bottom:10px;color:var(--text2);font-size:.95em}
+  .stat-row b{color:var(--text)}
+  .skymap-grid{display:grid;gap:14px;grid-template-columns:1fr 1fr;align-items:start}
+  @media (max-width:1024px){.skymap-grid{grid-template-columns:1fr}}
+  .polar-wrap{position:relative;width:100%;background:#1a1a1a;border-radius:6px;overflow:hidden;aspect-ratio:1/1;max-height:80vh;max-width:80vh;justify-self:center}
+  .polar-wrap canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  .legend-grad{height:14px;border-radius:3px;margin:6px 0 2px 0}
+  .legend-axis{display:flex;justify-content:space-between;font-size:.8em;color:var(--text2)}
+  .tracks-panel table{width:100%;border-collapse:collapse;font-size:.92em}
+  .tracks-panel th{text-align:left;border-bottom:1px solid var(--border);padding:6px 8px;color:var(--text2);font-weight:normal}
+  .tracks-panel td{padding:6px 8px;border-bottom:1px solid var(--surface2)}
+  .tracks-panel tr.silent{opacity:.6}
+  .tracks-panel tr{cursor:pointer}
+  .tracks-panel tr:hover td{background:rgba(0,188,212,.06)}
+  .tracks-panel tr.selected td{background:rgba(0,188,212,.14)}
+  .silent-tag{background:var(--surface2);color:var(--warn);padding:1px 6px;border-radius:6px;font-size:.8em}
+  .dim{color:var(--text2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topnav">
+    <span><a href="/">← Groundstation</a></span>
+    <span class="dim">Skymap (rolling window)</span>
+  </div>
+
+  <section class="card">
+    <h2>Inferred sky obstruction map</h2>
+    <div class="controls">
+      <label>Metric:
+        <select id="metric">
+          <option value="snr_p50">Median SNR (dB)</option>
+          <option value="silence_rate">Silence rate</option>
+          <option value="samples">Sample count</option>
+        </select>
+      </label>
+      <label>Satellite:
+        <select id="satellite"><option value="">All</option></select>
+      </label>
+      <label><input type="checkbox" id="show-tracks"> Overlay recent tracks</label>
+      <button id="refresh" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 10px;cursor:pointer">Refresh</button>
+    </div>
+    <div class="stat-row">
+      <span>Passes in window: <b id="stat-passes">–</b></span>
+      <span>Silent: <b id="stat-silent">–</b></span>
+      <span>Retention: <b id="stat-retention">–</b> days</span>
+      <span>Bin size: <b id="stat-binsize">–</b></span>
+      <span>Last update: <b id="stat-update">–</b></span>
+    </div>
+    <div class="skymap-grid">
+      <div class="polar-wrap"><canvas id="polar-canvas"></canvas></div>
+      <div>
+        <div id="legend">
+          <div class="legend-grad" id="legend-grad"></div>
+          <div class="legend-axis"><span id="legend-min">min</span><span id="legend-max">max</span></div>
+          <div class="dim" style="font-size:.85em;margin-top:6px" id="legend-help"></div>
+        </div>
+        <div class="tracks-panel" style="margin-top:14px">
+          <h3 style="font-size:.9em;color:var(--accent);margin:0 0 6px 0;text-transform:uppercase;letter-spacing:.04em;font-weight:600">Recent passes</h3>
+          <table>
+            <thead><tr><th>Satellite</th><th>When</th><th>Samples</th><th></th></tr></thead>
+            <tbody id="tracks-body"><tr><td colspan="4" class="dim">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+const AZ_BINS = 72, EL_BINS = 18;  // mirrors auto/skymap.py constants
+let aggregate = null;
+let tracks = [];
+let selectedTrackId = null;
+let elevationThreshold = 5;
+
+function fmtTime(iso){ if (!iso) return '–'; const d = new Date(iso); return d.toLocaleString(); }
+
+/* viridis-ish color ramp via interpolating a small palette. */
+const VIRIDIS = [
+  [68,1,84],[72,40,120],[62,73,137],[49,104,142],
+  [38,130,142],[31,158,137],[53,183,121],[110,206,88],
+  [181,222,43],[253,231,37],
+];
+function colorRamp(t){  // t in 0..1
+  if (!isFinite(t)) return 'rgb(40,40,40)';
+  t = Math.max(0, Math.min(1, t));
+  const x = t * (VIRIDIS.length - 1);
+  const i = Math.floor(x);
+  const f = x - i;
+  const a = VIRIDIS[i];
+  const b = VIRIDIS[Math.min(i+1, VIRIDIS.length-1)];
+  const r = Math.round(a[0] + (b[0]-a[0])*f);
+  const g = Math.round(a[1] + (b[1]-a[1])*f);
+  const bl = Math.round(a[2] + (b[2]-a[2])*f);
+  return `rgb(${r},${g},${bl})`;
+}
+
+function metricRange(metric){
+  if (!aggregate || !aggregate.cells.length) return [0, 1];
+  const vals = aggregate.cells.map(c => c[metric]).filter(v => v != null && isFinite(v));
+  if (!vals.length) return [0, 1];
+  const lo = Math.min(...vals), hi = Math.max(...vals);
+  if (lo === hi) return [lo, lo + 1];
+  return [lo, hi];
+}
+
+function drawHeatmap(ctx, w, h){
+  const cx = w/2, cy = h/2;
+  const radius = Math.min(w, h) * 0.45;
+
+  // background
+  ctx.fillStyle = '#0e0e0e';
+  ctx.fillRect(0, 0, w, h);
+
+  // dome
+  ctx.fillStyle = '#181818';
+  ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2); ctx.fill();
+
+  if (!aggregate) return;
+
+  const metric = document.getElementById('metric').value;
+  const [lo, hi] = metricRange(metric);
+
+  // Cells: az_idx 0..71 (5° each), el_idx 0..17 (5° each, 0 = horizon, 17 = zenith).
+  // Polar plot: zenith is at center, horizon at outer ring.
+  const azStep = 360 / AZ_BINS;
+  const elStep = 90 / EL_BINS;
+  for (const c of aggregate.cells){
+    const v = c[metric];
+    if (v == null || !isFinite(v)) continue;
+    const t = (v - lo) / (hi - lo);
+    const colr = colorRamp(t);
+    const az0 = c.az_idx * azStep;
+    const az1 = az0 + azStep;
+    const el0 = c.el_idx * elStep;
+    const el1 = el0 + elStep;
+    // Map elevation to radial: r = (1 - el/90) * radius
+    const rOuter = (1 - el0/90) * radius;
+    const rInner = (1 - el1/90) * radius;
+    // Azimuth: 0=N at top, increases clockwise. Canvas angle: 0 = +x (east), increases CCW.
+    // Convert: canvas_angle = (az - 90) deg, in radians.
+    const a0 = (az0 - 90) * Math.PI / 180;
+    const a1 = (az1 - 90) * Math.PI / 180;
+    ctx.fillStyle = colr;
+    ctx.beginPath();
+    ctx.arc(cx, cy, rOuter, a0, a1, false);
+    ctx.arc(cx, cy, rInner, a1, a0, true);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // grid rings
+  ctx.strokeStyle = 'rgba(255,255,255,0.10)';
+  ctx.lineWidth = 1;
+  for (const el of [0, 30, 60]){
+    const r = (1 - el/90) * radius;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.stroke();
+  }
+  // threshold ring
+  if (elevationThreshold > 0 && elevationThreshold < 90){
+    const r = (1 - elevationThreshold/90) * radius;
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  // cardinal lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.beginPath();
+  for (let a = 0; a < 360; a += 45){
+    const rad = (a - 90) * Math.PI / 180;
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(rad)*radius, cy + Math.sin(rad)*radius);
+  }
+  ctx.stroke();
+  // outer edge
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+  ctx.beginPath(); ctx.arc(cx, cy, radius, 0, Math.PI*2); ctx.stroke();
+
+  // cardinal labels
+  ctx.fillStyle = '#aaa';
+  const fontPx = Math.max(11, radius*0.07);
+  ctx.font = `${fontPx}px var(--font, sans-serif)`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const lpad = radius + fontPx*0.9;
+  ctx.fillText('N', cx, cy - lpad);
+  ctx.fillText('S', cx, cy + lpad);
+  ctx.fillText('E', cx + lpad, cy);
+  ctx.fillText('W', cx - lpad, cy);
+
+  // tracks overlay
+  if (document.getElementById('show-tracks').checked){
+    drawTracks(ctx, cx, cy, radius);
+  }
+}
+
+function polarXY(cx, cy, radius, az, el){
+  const r = (1 - el/90) * radius;
+  const a = (az - 90) * Math.PI / 180;
+  return [cx + r * Math.cos(a), cy + r * Math.sin(a)];
+}
+
+function drawTracks(ctx, cx, cy, radius){
+  if (!tracks.length) return;
+  ctx.lineWidth = Math.max(1.5, radius*0.012);
+  for (const tr of tracks){
+    if (selectedTrackId && tr.pass_id !== selectedTrackId) continue;
+    if (tr.silent) continue;
+    let prev = null;
+    for (const s of tr.samples){
+      if (s.el < 0){ prev = null; continue; }
+      const [x, y] = polarXY(cx, cy, radius, s.az, Math.max(0, s.el));
+      if (prev){
+        ctx.strokeStyle = s.has_carrier ? 'rgba(0,255,140,0.55)' : 'rgba(255,80,80,0.55)';
+        ctx.beginPath(); ctx.moveTo(prev[0], prev[1]); ctx.lineTo(x, y); ctx.stroke();
+      }
+      prev = [x, y];
+    }
+  }
+}
+
+function drawLegend(){
+  const grad = document.getElementById('legend-grad');
+  const stops = [];
+  for (let i = 0; i <= 10; i++){
+    stops.push(`${colorRamp(i/10)} ${i*10}%`);
+  }
+  grad.style.background = `linear-gradient(to right, ${stops.join(', ')})`;
+
+  const metric = document.getElementById('metric').value;
+  const [lo, hi] = metricRange(metric);
+  const fmt = metric === 'silence_rate'
+    ? v => `${(v*100).toFixed(0)}%`
+    : metric === 'samples'
+    ? v => v.toFixed(0)
+    : v => v.toFixed(1);
+  document.getElementById('legend-min').textContent = fmt(lo);
+  document.getElementById('legend-max').textContent = fmt(hi);
+
+  const help = {
+    snr_p50: 'Median peak-over-floor SNR per (az, el) cell. Higher = stronger received signal.',
+    silence_rate: 'Fraction of in-window seconds with no carrier detected. Higher = obstructed (or satellite was off).',
+    samples: 'Number of 1-second observations contributed to this cell.',
+  };
+  document.getElementById('legend-help').textContent = help[metric] || '';
+}
+
+function renderStats(){
+  if (!aggregate){
+    document.getElementById('stat-passes').textContent = '–';
+    document.getElementById('stat-silent').textContent = '–';
+    document.getElementById('stat-retention').textContent = '–';
+    document.getElementById('stat-binsize').textContent = '–';
+    return;
+  }
+  document.getElementById('stat-passes').textContent = aggregate.total_passes;
+  document.getElementById('stat-silent').textContent = aggregate.silent_passes;
+  document.getElementById('stat-retention').textContent = aggregate.retention_days;
+  document.getElementById('stat-binsize').textContent =
+    `${aggregate.az_bin_deg}° az × ${aggregate.el_bin_deg}° el`;
+  document.getElementById('stat-update').textContent = new Date().toLocaleTimeString();
+
+  const sel = document.getElementById('satellite');
+  const cur = sel.value;
+  const have = new Set(['']);
+  sel.innerHTML = '<option value="">All</option>';
+  for (const s of aggregate.satellites){
+    const opt = document.createElement('option');
+    opt.value = s; opt.textContent = s;
+    sel.appendChild(opt);
+    have.add(s);
+  }
+  if (have.has(cur)) sel.value = cur;
+}
+
+function renderTracks(){
+  const tbody = document.getElementById('tracks-body');
+  if (!tracks.length){
+    tbody.innerHTML = '<tr><td colspan="4" class="dim">No passes yet.</td></tr>';
+    return;
+  }
+  const rows = [];
+  for (const tr of tracks){
+    const cls = (tr.silent ? 'silent ' : '') + (tr.pass_id === selectedTrackId ? 'selected' : '');
+    const tag = tr.silent ? '<span class="silent-tag">silent</span>' : '';
+    rows.push(`<tr class="${cls}" data-pass="${tr.pass_id}"><td>${tr.satellite_name} ${tag}</td><td>${fmtTime(tr.recorded_at)}</td><td>${tr.samples.length}</td><td class="dim">→</td></tr>`);
+  }
+  tbody.innerHTML = rows.join('');
+  tbody.querySelectorAll('tr').forEach(row => {
+    row.addEventListener('click', () => {
+      const pid = row.getAttribute('data-pass');
+      selectedTrackId = (selectedTrackId === pid) ? null : pid;
+      // selecting a track only makes sense with the overlay on
+      document.getElementById('show-tracks').checked = (selectedTrackId !== null);
+      renderTracks();
+      redraw();
+    });
+  });
+}
+
+function redraw(){
+  const canvas = document.getElementById('polar-canvas');
+  const wrap = canvas.parentElement;
+  const dpr = window.devicePixelRatio || 1;
+  const w = wrap.clientWidth, h = wrap.clientHeight;
+  if (canvas.width !== w*dpr || canvas.height !== h*dpr){
+    canvas.width = w*dpr; canvas.height = h*dpr;
+  }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawHeatmap(ctx, w, h);
+  drawLegend();
+}
+
+async function loadAggregate(){
+  const sat = document.getElementById('satellite').value;
+  const url = '/api/skymap' + (sat ? `?satellite=${encodeURIComponent(sat)}` : '');
+  const r = await fetch(url);
+  if (!r.ok) return;
+  aggregate = await r.json();
+  if (typeof aggregate.pass_elevation_threshold_deg === 'number'){
+    elevationThreshold = aggregate.pass_elevation_threshold_deg;
+  }
+  renderStats();
+  redraw();
+}
+
+async function loadTracks(){
+  const sat = document.getElementById('satellite').value;
+  const url = '/api/skymap/tracks' + (sat ? `?satellite=${encodeURIComponent(sat)}` : '');
+  const r = await fetch(url);
+  if (!r.ok) return;
+  const data = await r.json();
+  tracks = data.tracks || [];
+  renderTracks();
+  redraw();
+}
+
+async function refreshAll(){
+  await loadAggregate();
+  await loadTracks();
+}
+
+document.getElementById('metric').addEventListener('change', redraw);
+document.getElementById('satellite').addEventListener('change', refreshAll);
+document.getElementById('show-tracks').addEventListener('change', redraw);
+document.getElementById('refresh').addEventListener('click', refreshAll);
+window.addEventListener('resize', redraw);
+
+/* WebSocket: refresh when a new observation lands. */
+function connectWS(){
+  let scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${scheme}//${location.host}/ws`);
+  ws.addEventListener('message', ev => {
+    try {
+      const msg = JSON.parse(ev.data);
+      if (msg.kind === 'event' && msg.event && msg.event.type === 'skymap_updated'){
+        refreshAll();
+      }
+    } catch (e) { /* ignore */ }
+  });
+  ws.addEventListener('close', () => setTimeout(connectWS, 2000 + Math.random()*2000));
+}
+connectWS();
+refreshAll();
+</script>
+</body>
+</html>

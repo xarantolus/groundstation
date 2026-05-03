@@ -5,7 +5,7 @@ import collections
 import logging
 import os
 import uuid
-from typing import Deque, Dict, Optional, Set, Tuple
+from typing import Deque, Dict, List, Optional, Set, Tuple
 
 from . import events as E
 from .bus import EventBus, run_subscriber
@@ -53,6 +53,7 @@ class DecoderService:
         gate: DecodeGate,
         passes: Dict[str, Pass],
         waterfalls: WaterfallStore,
+        iq_consumers: Optional[List[str]] = None,
     ) -> None:
         self._cfg = cfg
         self._bus = bus
@@ -60,6 +61,9 @@ class DecoderService:
         self._gate = gate
         self._passes = passes
         self._waterfalls = waterfalls
+        # Non-decoder consumers of recording.bin (e.g. skymap analyzer).
+        # `_after_all_decoders` waits for both decoders and these to settle.
+        self._iq_consumers: List[str] = list(iq_consumers or [])
         self._queue: Deque[Tuple[str, int, int]] = collections.deque()
         self._in_queue: Set[Tuple[str, int]] = set()
         self._wakeup = asyncio.Event()
@@ -108,6 +112,7 @@ class DecoderService:
         sub = self._bus.subscribe(
             E.RecordingCompleted,
             E.RecordingStarted,
+            E.IqConsumerSettled,
             name="decoder.events",
             queue_size=128,
         )
@@ -169,6 +174,10 @@ class DecoderService:
                 return
             pending = list(range(len(p.satellite.decoder)))
             p.decoders_pending = pending
+            # Initialise the IQ-consumer gate so non-decoder consumers
+            # (e.g. skymap) can hold the IQ alive until they're done.
+            p.iq_consumers_pending = list(self._iq_consumers)
+            p.iq_consumers_done = []
             p.status = PassStatus.RECORDED
             await self._state.save_pass_async(p)
             for idx in pending:
@@ -181,6 +190,20 @@ class DecoderService:
                     "recording starting — killing active decoder %s", self._active_key
                 )
                 self._active_kill_event.set()
+        elif isinstance(event, E.IqConsumerSettled):
+            # A non-decoder IQ consumer (e.g. skymap) just finished. If
+            # decoders are also already done, fire the cleanup that
+            # compresses/uploads/deletes the IQ.
+            p = self._passes.get(event.pass_id)
+            if (
+                p is not None
+                and self._iq_release_ready(p)
+                and p.id not in self._cleanup_launched
+            ):
+                self._cleanup_launched.add(p.id)
+                task = asyncio.create_task(self._after_all_decoders(p))
+                self._cleanup_tasks.add(task)
+                task.add_done_callback(self._cleanup_tasks.discard)
 
     async def _run_one(self, pass_id: str, decoder_index: int, attempt: int) -> None:
         p = self._passes.get(pass_id)
@@ -342,7 +365,7 @@ class DecoderService:
             await self._bus.publish(
                 E.DecodeFailed(pass_id=pass_id, decoder_index=decoder_index, error=error_text)
             )
-            if self._all_decoders_settled(p) and p.id not in self._cleanup_launched:
+            if self._iq_release_ready(p) and p.id not in self._cleanup_launched:
                 self._cleanup_launched.add(p.id)
                 task = asyncio.create_task(self._after_all_decoders(p))
                 self._cleanup_tasks.add(task)
@@ -425,7 +448,7 @@ class DecoderService:
                     E.PassesTableChanged(passes=list(self._passes.values()))
                 )
 
-        if self._all_decoders_settled(p) and p.id not in self._cleanup_launched:
+        if self._iq_release_ready(p) and p.id not in self._cleanup_launched:
             # Cleanup (incl. waiting up to 30 minutes for the IQ upload) must
             # not block the decoder main loop — otherwise a slow NAS stalls
             # every subsequent pass. Spawn it as a background task.
@@ -438,6 +461,12 @@ class DecoderService:
         total = len(p.satellite.decoder)
         done = len(set(p.decoders_done) | set(p.decoders_failed))
         return done >= total
+
+    def _iq_release_ready(self, p: Pass) -> bool:
+        """The IQ can be compressed/uploaded/deleted only when every
+        decoder has settled AND every non-decoder consumer has marked
+        itself done. Either gate alone is insufficient."""
+        return self._all_decoders_settled(p) and not p.iq_consumers_pending
 
     async def _after_all_decoders(self, p: Pass) -> None:
         """Called exactly once per pass, when every decoder has settled.
