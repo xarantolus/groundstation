@@ -89,6 +89,26 @@ def test_row_snr_detects_carrier_above_noise():
     assert snr > 20.0
 
 
+def test_row_snr_detects_wideband_signal():
+    """Regression: 17 real passes were misclassified silent because the
+    noise floor / MAD were estimated over the full spectrum, which
+    inflated the threshold whenever the signal occupied a meaningful
+    fraction of the passband (LRPT ≈ 40 % of a 384 kS/s capture)."""
+    rng = np.random.default_rng(7)
+    n = FFT_SIZE * 16
+    sr = 384_000
+    noise = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(np.complex64) * 0.1
+    # Fill ~150 kHz of bandwidth with band-limited Gaussian "signal" — a
+    # crude stand-in for LRPT modulation. Centred at +20 kHz so it
+    # straddles DC after fftshift.
+    raw = (rng.standard_normal(n) + 1j * rng.standard_normal(n)).astype(np.complex64) * 0.3
+    f = np.fft.fftfreq(n, d=1 / sr)
+    mask = (np.abs(f - 20_000) < 75_000).astype(np.float32)
+    sig = np.fft.ifft(np.fft.fft(raw) * mask).astype(np.complex64)
+    snr, has_carrier = _row_snr(noise + sig)
+    assert has_carrier, f"wideband signal misclassified silent: snr={snr:.1f}"
+
+
 def test_row_snr_pure_noise_has_no_carrier():
     rng = np.random.default_rng(1)
     n = FFT_SIZE * 4

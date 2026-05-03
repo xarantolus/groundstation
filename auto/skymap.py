@@ -36,8 +36,19 @@ CONSUMER_NAME = "skymap"
 FFT_SIZE = 4096
 FFTS_PER_SECOND = 16
 CARRIER_K_MAD = 4.0
-CARRIER_MIN_SNR_DB = 6.0
+# Floor for the carrier-presence threshold. Has to clear the natural
+# extreme-value tail of max-of-N-bins on pure noise (~4 dB for our 4096
+# bins, 16-FFT averaging) with margin, otherwise pure noise registers
+# as a carrier.
+CARRIER_MIN_SNR_DB = 8.0
 PASS_SILENCE_RATIO = 0.05
+# Fraction of sorted bin powers used as the noise estimator. Anything
+# above this is treated as potential signal and excluded from the floor
+# / MAD calculation. 0.5 is robust up to wide signals that occupy ~half
+# the passband (LRPT in 384 kS/s capture, AX100 with broad LO leak,
+# etc.); the previous full-spectrum estimator inflated MAD on those
+# passes badly enough to mask every carrier.
+NOISE_QUANTILE = 0.5
 
 AZ_BIN_DEG = 5.0
 EL_BIN_DEG = 5.0
@@ -323,6 +334,23 @@ class SkymapService:
             return None
 
         carrier_rate = rows_with_carrier / total_rows
+        snrs = np.asarray([s.snr_db for s in samples_out])
+        carrier_snrs = np.asarray(
+            [s.snr_db for s in samples_out if s.has_carrier]
+        )
+        logger.info(
+            "skymap: %s — %d rows, carrier %.0f%% (%d/%d), snr p50=%.1f p90=%.1f, "
+            "carrier-only p50=%.1f, threshold=%.1f dB",
+            p.id,
+            total_rows,
+            carrier_rate * 100,
+            rows_with_carrier,
+            total_rows,
+            float(np.median(snrs)),
+            float(np.quantile(snrs, 0.9)),
+            float(np.median(carrier_snrs)) if carrier_snrs.size else float("nan"),
+            CARRIER_MIN_SNR_DB,
+        )
         return SkyObservation(
             pass_id=p.id,
             satellite_name=p.satellite.name,
@@ -487,9 +515,11 @@ class SkymapService:
 
 def _row_snr(samples: np.ndarray) -> Tuple[float, bool]:
     """Average a few non-overlapping FFTs over the chunk, return
-    ``(peak − floor, has_carrier)`` in dB. Auto-calibrating: floor is the
-    median of the per-bin power for this row, so the absolute scale of the
-    SDR drops out."""
+    ``(peak − floor, has_carrier)`` in dB. Auto-calibrating: the floor is
+    the median of the *lower half* of the per-bin power distribution so
+    the wide signals we actually receive (LRPT, AX100 with broad LO
+    leak) don't lift the apparent floor or inflate MAD past the
+    detection threshold."""
     n = samples.size
     if n < FFT_SIZE:
         return 0.0, False
@@ -506,11 +536,17 @@ def _row_snr(samples: np.ndarray) -> Tuple[float, bool]:
     assert accum is not None
     accum = accum / n_avg
     spec_db = 10.0 * np.log10(accum + 1e-20)
-    floor = float(np.median(spec_db))
-    peak = float(np.max(spec_db))
-    mad = float(np.median(np.abs(spec_db - floor)))
+
+    sorted_db = np.sort(spec_db)
+    cut = max(1, int(sorted_db.size * NOISE_QUANTILE))
+    noise_only = sorted_db[:cut]
+    floor = float(np.median(noise_only))
+    mad = float(np.median(np.abs(noise_only - floor)))
+    peak = float(sorted_db[-1])
     snr = peak - floor
-    threshold = max(CARRIER_K_MAD * mad, CARRIER_MIN_SNR_DB)
+
+    sigma_db = mad * 1.4826  # MAD → stdev for ~normal log-power
+    threshold = max(CARRIER_K_MAD * sigma_db, CARRIER_MIN_SNR_DB)
     return snr, snr > threshold
 
 
