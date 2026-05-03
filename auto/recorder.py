@@ -46,16 +46,16 @@ class RecorderService:
         self._bus = bus
         self._state = state
         self._stop = asyncio.Event()
-        # Most recently scheduled recording task. Each new task chains itself
-        # behind the previous so back-to-back partial-window passes serialise
-        # cleanly without dropping events on the floor.
-        self._active: Optional[asyncio.Task] = None
         self._tasks: set[asyncio.Task] = set()
         # Stop signal for the currently-running run_recorder (if any). A new
         # PassStarted sets this to make the prior recorder exit eagerly so the
-        # SDR is free for the next pass — beats `await prev` which waits for
-        # the prior trail seconds and bookkeeping to finish naturally.
+        # SDR is free for the next pass.
         self._active_stop: Optional[asyncio.Event] = None
+        # Set inside _record's finally as soon as run_recorder returns, i.e.
+        # as soon as the SDR is free. The next pass's _chain_record awaits
+        # this — *not* the full prev task — so save_pass + transfer_put for
+        # the prior pass don't gate the next podman launch.
+        self._active_sdr_released: Optional[asyncio.Event] = None
         # Per-pass background tasks that pre-write doppler.txt before the
         # recorder launches. _record awaits the matching task before podman
         # so the GR flowgraph never opens a missing file.
@@ -111,15 +111,16 @@ class RecorderService:
     def _handle_pass_started(self, event: E.PassStarted) -> None:
         p = event.pass_
         logger.info("recorder: PassStarted received for %s", p.id)
-        prev = self._active
-        if prev is not None and not prev.done() and self._active_stop is not None:
-            if not self._active_stop.is_set():
+        prev_sdr = self._active_sdr_released
+        if prev_sdr is not None and not prev_sdr.is_set():
+            if self._active_stop is not None and not self._active_stop.is_set():
                 logger.info(
                     "recorder: signalling prev recording to stop so %s can launch", p.id
                 )
                 self._active_stop.set()
-        task = asyncio.create_task(self._chain_record(p, prev))
-        self._active = task
+        new_sdr = asyncio.Event()
+        self._active_sdr_released = new_sdr
+        task = asyncio.create_task(self._chain_record(p, prev_sdr, new_sdr))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
@@ -153,24 +154,37 @@ class RecorderService:
         except Exception:
             logger.exception("precompute doppler for %s failed; will retry inline at record time", p.id)
 
-    async def _chain_record(self, p: Pass, prev: Optional[asyncio.Task]) -> None:
-        # Wait for the previous recording to finish (it should already be
-        # tearing down because _handle_pass_started set its stop event).
+    async def _chain_record(
+        self,
+        p: Pass,
+        prev_sdr: Optional[asyncio.Event],
+        my_sdr: asyncio.Event,
+    ) -> None:
+        # Wait only for the SDR to be free — *not* for the prev pass's
+        # post-recording bookkeeping (save_pass, RecordingCompleted publish,
+        # transfer_puts). Those run concurrently in the prev _record task.
         # _record's own late-start guard handles the case where waiting
         # pushed us past the new pass's window.
-        if prev is not None and not prev.done():
+        if prev_sdr is not None and not prev_sdr.is_set():
             wait_t0 = time.monotonic()
-            logger.info("recorder: %s awaiting prev recording", p.id)
+            logger.info("recorder: %s awaiting prev SDR release", p.id)
             try:
-                await prev
-            except (asyncio.CancelledError, Exception):
-                pass
+                await prev_sdr.wait()
+            except asyncio.CancelledError:
+                raise
             logger.info(
-                "recorder: %s prev done after %.2fs", p.id, time.monotonic() - wait_t0
+                "recorder: %s SDR free after %.2fs", p.id, time.monotonic() - wait_t0
             )
-        await self._record(p)
+        try:
+            await self._record(p, my_sdr)
+        finally:
+            # Belt-and-braces: if _record bailed before reaching its own
+            # finally (e.g. cancellation in setup), still release the SDR
+            # so a subsequent pass isn't blocked forever.
+            if not my_sdr.is_set():
+                my_sdr.set()
 
-    async def _record(self, p: Pass) -> None:
+    async def _record(self, p: Pass, sdr_released: asyncio.Event) -> None:
         record_t0 = time.monotonic()
         logger.info("recorder: _record entered for %s", p.id)
         os.makedirs(p.pass_dir, exist_ok=True)
@@ -195,12 +209,13 @@ class RecorderService:
                 await loop.run_in_executor(None, self._write_doppler_file, p)
             except Exception as e:
                 logger.exception("could not write doppler file for %s", p.id)
+                sdr_released.set()
                 await self._fail(p, f"doppler file generation failed: {e}")
                 return
 
         p.status = PassStatus.RECORDING
         save_t0 = time.monotonic()
-        self._state.save_pass(p)
+        await self._state.save_pass_async(p)
         publish_t0 = time.monotonic()
         await self._bus.publish(E.RecordingStarted(pass_id=p.id))
         logger.info(
@@ -233,9 +248,11 @@ class RecorderService:
             record_until = p.pass_info.end_time + datetime.timedelta(seconds=RECORDING_TRAIL_SECONDS)
         record_minutes = (record_until - now).total_seconds() / 60
         if record_minutes < 0.5:
+            sdr_released.set()
             await self._fail(p, "pass already ended at start")
             return
 
+        path: Optional[str] = None
         try:
             try:
                 path = await run_recorder(
@@ -255,12 +272,19 @@ class RecorderService:
                 await self._fail(p, f"recorder crashed: {e}")
                 return
         finally:
+            # Release the SDR the moment run_recorder unwinds, before the
+            # post-recording bookkeeping below — that's the whole point of
+            # the per-pass sdr_released event.
+            sdr_released.set()
             if self._active_stop is stop_event:
                 self._active_stop = None
 
+        if path is None:
+            return
+
         p.recording_path = path
         p.status = PassStatus.RECORDED
-        self._state.save_pass(p)
+        await self._state.save_pass_async(p)
         await self._bus.publish(E.RecordingCompleted(pass_id=p.id, path=path))
 
         # IQ upload happens post-decode in DecoderService._after_all_decoders.
@@ -282,12 +306,12 @@ class RecorderService:
                 pass_id=p.id,
                 label=f"{p.satellite.name} {label}",
             )
-            self._state.transfer_put(req)
+            await self._state.transfer_put_async(req)
             await self._bus.publish(E.TransferQueued(request=req))
 
     async def _fail(self, p: Pass, reason: str) -> None:
         p.status = PassStatus.FAILED
-        self._state.save_pass(p)
+        await self._state.save_pass_async(p)
         logger.error("recorder failed for %s: %s", p.id, reason)
         await self._bus.publish(E.RecordingFailed(pass_id=p.id, error=reason))
 

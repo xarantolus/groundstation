@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import datetime
 import json
 import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional
 
 from pydantic import BaseModel, ValidationError
 
@@ -91,6 +93,49 @@ class StateStore:
         self.corrupt_dir = self.root / "corrupt"
         self.root.mkdir(parents=True, exist_ok=True)
         self.passes_dir.mkdir(parents=True, exist_ok=True)
+        # All async writers serialise on this single-thread executor so
+        # concurrent jsonl appends don't interleave at the byte level
+        # (open(..., "a") + fsync isn't atomic across threads).
+        self._io_executor: Optional[concurrent.futures.ThreadPoolExecutor] = None
+
+    def _executor(self) -> concurrent.futures.ThreadPoolExecutor:
+        if self._io_executor is None:
+            self._io_executor = concurrent.futures.ThreadPoolExecutor(
+                max_workers=1, thread_name_prefix="state-io"
+            )
+        return self._io_executor
+
+    async def save_pass_async(self, p: Pass) -> None:
+        await asyncio.get_running_loop().run_in_executor(
+            self._executor(), self.save_pass, p
+        )
+
+    async def transfer_put_async(self, req: TransferRequest) -> None:
+        await asyncio.get_running_loop().run_in_executor(
+            self._executor(), self.transfer_put, req
+        )
+
+    async def transfer_tombstone_async(self, req_id: str) -> None:
+        await asyncio.get_running_loop().run_in_executor(
+            self._executor(), self.transfer_tombstone, req_id
+        )
+
+    async def decode_put_async(
+        self, pass_id: str, decoder_index: int, attempt: int = 0
+    ) -> None:
+        await asyncio.get_running_loop().run_in_executor(
+            self._executor(), self.decode_put, pass_id, decoder_index, attempt
+        )
+
+    async def decode_tombstone_async(self, pass_id: str, decoder_index: int) -> None:
+        await asyncio.get_running_loop().run_in_executor(
+            self._executor(), self.decode_tombstone, pass_id, decoder_index
+        )
+
+    async def delete_pass_async(self, pass_id: str) -> None:
+        await asyncio.get_running_loop().run_in_executor(
+            self._executor(), self.delete_pass, pass_id
+        )
 
     # ---------- Passes ----------
 

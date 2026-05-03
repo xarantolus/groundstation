@@ -130,7 +130,7 @@ class TransferService:
         original_source = req.source_path
         if not os.path.exists(original_source):
             logger.warning("source missing, dropping transfer: %s", original_source)
-            self._state.transfer_tombstone(req.id)
+            await self._state.transfer_tombstone_async(req.id)
             await self._bus.publish(
                 E.TransferFailed(
                     request_id=req.id,
@@ -252,7 +252,7 @@ class TransferService:
 
         async with self._active_lock:
             self._active.pop(req.id, None)
-        self._state.transfer_tombstone(req.id)
+        await self._state.transfer_tombstone_async(req.id)
 
         event = E.TransferCompleted(
             request_id=req.id,
@@ -261,14 +261,16 @@ class TransferService:
             label=req.label,
         )
         self._completed_tail.append(event)
-        self._state.record_completed(
+        await asyncio.get_running_loop().run_in_executor(
+            self._state._executor(),
+            self._state.record_completed,
             {
                 "id": req.id,
                 "source": original_source,
                 "dest": working_dest,
                 "label": req.label,
                 "ts": event.ts.isoformat(),
-            }
+            },
         )
         await self._bus.publish(event)
 
@@ -323,8 +325,8 @@ class TransferService:
                     pass_id=req.pass_id,
                     label=req.label,
                 )
-                self._state.transfer_put(retry)
-                self._state.transfer_tombstone(req.id)
+                await self._state.transfer_put_async(retry)
+                await self._state.transfer_tombstone_async(req.id)
                 await self._bus.publish(E.TransferQueued(request=retry))
                 return
             logger.error(
@@ -371,15 +373,15 @@ class TransferService:
             # these two lines leaves both entries in state — the retry wins
             # on reload, so the work is preserved (vs. the reverse order
             # which could silently drop the work).
-            self._state.transfer_put(retry)
-            self._state.transfer_tombstone(req.id)
+            await self._state.transfer_put_async(retry)
+            await self._state.transfer_tombstone_async(req.id)
             await self._bus.publish(E.TransferQueued(request=retry))
             return
 
         logger.error(
             "transfer failed permanently after %d attempts: %s", MAX_ATTEMPTS, original_source
         )
-        self._state.transfer_tombstone(req.id)
+        await self._state.transfer_tombstone_async(req.id)
         if not req.keep_source:
             for path in {working_source, original_source}:
                 try:

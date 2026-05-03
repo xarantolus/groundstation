@@ -176,6 +176,11 @@ MIN_RECORDING_WINDOW = datetime.timedelta(minutes=2)
 # Edge of a pass spent at low elevation; signal there is rarely useful, so
 # don't accept a trim that lands inside it.
 USELESS_EDGE = datetime.timedelta(minutes=1)
+# Time-slicing granularity for score-based overlap allocation. 30s is fine
+# enough that a crossover lands on a slice boundary within rounding error
+# even for fast LEO passes, and coarse enough that a 15-minute cluster only
+# evaluates ~30 slices per pass.
+SLICE_SECONDS = 30
 
 
 def _pass_score(sat: Satellite, pi: PassInfo) -> float:
@@ -185,29 +190,124 @@ def _pass_score(sat: Satellite, pi: PassInfo) -> float:
     return sat.priority + pi.max_elevation / ELEVATION_SCORE_DIVISOR
 
 
-def _largest_free_subwindow(
-    window_start: datetime.datetime,
-    window_end: datetime.datetime,
-    occupied: List[Tuple[datetime.datetime, datetime.datetime]],
-) -> Tuple[datetime.datetime, datetime.datetime]:
-    cuts = sorted(
-        (max(s, window_start), min(e, window_end))
-        for s, e in occupied
-        if s < window_end and e > window_start
-    )
-    best = (window_start, window_start)
-    cursor = window_start
-    for s, e in cuts:
-        if s > cursor:
-            piece = (cursor, s)
-            if piece[1] - piece[0] > best[1] - best[0]:
-                best = piece
-        cursor = max(cursor, e)
-    if window_end > cursor:
-        piece = (cursor, window_end)
-        if piece[1] - piece[0] > best[1] - best[0]:
-            best = piece
-    return best
+def _elevation_at(pi: PassInfo, t: datetime.datetime) -> float:
+    """Linear interpolation of the pass elevation at time ``t``. Returns the
+    edge value if ``t`` falls outside the pass window. Two-segment triangle
+    (start→max, max→end) — close enough for scoring; we don't need the full
+    sub-degree astronomy here."""
+    if t <= pi.start_time:
+        return pi.start_elevation
+    if t >= pi.end_time:
+        return pi.end_elevation
+    if t <= pi.max_time:
+        denom = max(1.0, (pi.max_time - pi.start_time).total_seconds())
+        frac = (t - pi.start_time).total_seconds() / denom
+        return pi.start_elevation + frac * (pi.max_elevation - pi.start_elevation)
+    denom = max(1.0, (pi.end_time - pi.max_time).total_seconds())
+    frac = (t - pi.max_time).total_seconds() / denom
+    return pi.max_elevation + frac * (pi.end_elevation - pi.max_elevation)
+
+
+def _score_at(sat: Satellite, pi: PassInfo, t: datetime.datetime) -> float:
+    return sat.priority + _elevation_at(pi, t) / ELEVATION_SCORE_DIVISOR
+
+
+def _slice_cluster(
+    cluster: List[Tuple[Satellite, PassInfo]],
+) -> List[Tuple[Satellite, PassInfo]]:
+    """Time-slice an overlapping cluster by per-moment score: each 30s slot
+    goes to whichever pass has the highest priority+interpolated-elevation
+    at that moment. Each pass keeps its single longest contiguous winning
+    region — the recorder model takes one window per pass, not multiple.
+    Adjacent winners' windows abut at the score crossover so the recorder's
+    handoff happens naturally there."""
+    cluster_start = min(p.start_time for _, p in cluster)
+    cluster_end = max(p.end_time for _, p in cluster)
+    slice_dt = datetime.timedelta(seconds=SLICE_SECONDS)
+
+    # Walk the cluster window slot-by-slot, recording the winner per slot.
+    slots: List[Tuple[datetime.datetime, datetime.datetime, int]] = []
+    t = cluster_start
+    while t < cluster_end:
+        slot_end = min(t + slice_dt, cluster_end)
+        mid = t + (slot_end - t) / 2
+        winner = -1
+        best = float("-inf")
+        for idx, (sat, pi) in enumerate(cluster):
+            if mid < pi.start_time or mid >= pi.end_time:
+                continue
+            s = _score_at(sat, pi, mid)
+            if s > best:
+                best = s
+                winner = idx
+        slots.append((t, slot_end, winner))
+        t = slot_end
+
+    # For each pass, find the longest run of contiguous winning slots.
+    longest: Dict[int, Tuple[datetime.datetime, datetime.datetime]] = {}
+    run_start: Optional[datetime.datetime] = None
+    run_idx = -2  # sentinel that doesn't match any real winner
+    for s_start, s_end, idx in slots + [(cluster_end, cluster_end, -2)]:
+        if idx != run_idx:
+            if run_idx >= 0 and run_start is not None:
+                run_end = s_start
+                cur = longest.get(run_idx)
+                if cur is None or (run_end - run_start) > (cur[1] - cur[0]):
+                    longest[run_idx] = (run_start, run_end)
+            run_idx = idx
+            run_start = s_start
+
+    picked: List[Tuple[Satellite, PassInfo]] = []
+    for idx, (sat, pi) in enumerate(cluster):
+        win = longest.get(idx)
+        if win is None:
+            logger.info("overlap: %s lost every slot to higher-scoring passes", sat.name)
+            continue
+        win_start, win_end = win
+
+        is_trimmed = win_start > pi.start_time or win_end < pi.end_time
+        if is_trimmed:
+            useful_start = pi.start_time + USELESS_EDGE
+            useful_end = pi.end_time - USELESS_EDGE
+            win_start = max(win_start, useful_start)
+            win_end = min(win_end, useful_end)
+
+        if win_end - win_start < MIN_RECORDING_WINDOW:
+            logger.info(
+                "overlap: skipped %s — only %ds in window after edge filter",
+                sat.name,
+                int((win_end - win_start).total_seconds()),
+            )
+            continue
+
+        trim_start = win_start if win_start > pi.start_time else None
+        trim_end = win_end if win_end < pi.end_time else None
+        if trim_start is not None or trim_end is not None:
+            new_pi = pi.model_copy(
+                update={
+                    "recording_start_override": trim_start,
+                    "recording_end_override": trim_end,
+                }
+            )
+            logger.info(
+                "overlap: %s trimmed to %s–%s (was %s–%s, max el %.0f°)",
+                sat.name,
+                win_start.strftime("%H:%M:%S"),
+                win_end.strftime("%H:%M:%S"),
+                pi.start_time.strftime("%H:%M:%S"),
+                pi.end_time.strftime("%H:%M:%S"),
+                pi.max_elevation,
+            )
+            picked.append((sat, new_pi))
+        else:
+            logger.info(
+                "overlap: %s kept full window (max el %.0f°)",
+                sat.name,
+                pi.max_elevation,
+            )
+            picked.append((sat, pi))
+
+    return picked
 
 
 def prioritize(
@@ -229,64 +329,11 @@ def prioritize(
             i = j
             continue
 
-        ranked = sorted(cluster, key=lambda t: _pass_score(*t), reverse=True)
-        best_sat, best_pi = ranked[0]
         considered = ", ".join(
             f"{s.name}@{p.max_elevation:.0f}°" for s, p in cluster
         )
-        logger.info(
-            "overlap: %d passes (%s), selected %s@%.0f°",
-            len(cluster),
-            considered,
-            best_sat.name,
-            best_pi.max_elevation,
-        )
-        picked.append((best_sat, best_pi))
-        occupied: List[Tuple[datetime.datetime, datetime.datetime]] = [
-            (best_pi.start_time, best_pi.end_time)
-        ]
-
-        for cand_sat, cand_pi in ranked[1:]:
-            useful_start = cand_pi.start_time + USELESS_EDGE
-            useful_end = cand_pi.end_time - USELESS_EDGE
-            if useful_end - useful_start < MIN_RECORDING_WINDOW:
-                logger.info(
-                    "overlap: skipped %s — useful window too short",
-                    cand_sat.name,
-                )
-                continue
-            sub_start, sub_end = _largest_free_subwindow(
-                useful_start, useful_end, occupied
-            )
-            free = sub_end - sub_start
-            if free < MIN_RECORDING_WINDOW:
-                logger.info(
-                    "overlap: skipped %s — only %ds free in window",
-                    cand_sat.name,
-                    int(free.total_seconds()),
-                )
-                continue
-            trimmed_pi = cand_pi
-            trim_start = sub_start if sub_start > cand_pi.start_time else None
-            trim_end = sub_end if sub_end < cand_pi.end_time else None
-            if trim_start is not None or trim_end is not None:
-                trimmed_pi = cand_pi.model_copy(
-                    update={
-                        "recording_start_override": trim_start,
-                        "recording_end_override": trim_end,
-                    }
-                )
-                logger.info(
-                    "overlap: trimmed %s to %s–%s (was %s–%s)",
-                    cand_sat.name,
-                    sub_start.strftime("%H:%M:%S"),
-                    sub_end.strftime("%H:%M:%S"),
-                    cand_pi.start_time.strftime("%H:%M:%S"),
-                    cand_pi.end_time.strftime("%H:%M:%S"),
-                )
-            picked.append((cand_sat, trimmed_pi))
-            occupied.append((sub_start, sub_end))
-
+        logger.info("overlap: %d passes (%s) — score-slicing", len(cluster), considered)
+        picked.extend(_slice_cluster(cluster))
         i = j
     return picked
 

@@ -192,7 +192,7 @@ class SchedulerService:
             # Transfers outlive the pass record (they have their own queue
             # keyed by req.id), so dropping the pass JSON is safe even if
             # the NAS upload hasn't finished.
-            self._state.delete_pass(p.id)
+            await self._state.delete_pass_async(p.id)
 
         # Every still-future PREDICTED pass (including recovered ones whose
         # pid doesn't match the fresh prediction) must have a live monitor.

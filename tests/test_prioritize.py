@@ -159,6 +159,54 @@ def test_score_divisor_value():
     assert ELEVATION_SCORE_DIVISOR == 30.0
 
 
+def test_same_priority_offset_peaks_split_at_crossover():
+    # Two pri-6 passes with the same elevation profile but offset peaks.
+    # Each should get the half centred on its own max — the old algorithm
+    # gave one of them everything and the other only the non-overlapping
+    # tail. Both end up "trimmed" so USELESS_EDGE clips a minute off each
+    # outside boundary too.
+    a = (_sat("EARLY_PEAK", 6), _pi(0, 10, 80))   # peak at 5
+    b = (_sat("LATE_PEAK", 6), _pi(5, 10, 80))    # peak at 10
+    picked = prioritize(sorted([a, b], key=lambda t: t[1].start_time))
+    names = _names(picked)
+    assert "EARLY_PEAK" in names
+    assert "LATE_PEAK" in names
+    early = next(pi for s, pi in picked if s.name == "EARLY_PEAK")
+    late = next(pi for s, pi in picked if s.name == "LATE_PEAK")
+    # EARLY_PEAK keeps its peak; window is [start+1, ~crossover].
+    assert early.recording_start_override == T0 + datetime.timedelta(minutes=1)
+    assert early.recording_end_override is not None
+    assert (
+        T0 + datetime.timedelta(minutes=7) <= early.recording_end_override
+        <= T0 + datetime.timedelta(minutes=8)
+    )
+    # LATE_PEAK keeps its peak; window is [~crossover, end-1].
+    assert late.recording_start_override is not None
+    assert late.recording_end_override == T0 + datetime.timedelta(minutes=14)
+    assert (
+        T0 + datetime.timedelta(minutes=7) <= late.recording_start_override
+        <= T0 + datetime.timedelta(minutes=8)
+    )
+
+
+def test_score_handoff_aligns_passes():
+    # Adjacent winning windows must abut at the score crossover so the
+    # recorder hands the SDR over without an explicit kill — the loser's
+    # end and the next winner's start should match.
+    a = (_sat("FIRST_PEAK", 6), _pi(0, 10, 60))   # peak at 5
+    b = (_sat("SECOND_PEAK", 6), _pi(6, 10, 60))  # peak at 11
+    picked = prioritize(sorted([a, b], key=lambda t: t[1].start_time))
+    first = next(pi for s, pi in picked if s.name == "FIRST_PEAK")
+    second = next(pi for s, pi in picked if s.name == "SECOND_PEAK")
+    assert first.recording_end_override is not None
+    assert second.recording_start_override is not None
+    # The two should align (within one slice = 30s)
+    delta = abs(
+        (first.recording_end_override - second.recording_start_override).total_seconds()
+    )
+    assert delta <= 30
+
+
 def test_simulation_table(capsys):
     scenarios = [
         ("pri10/5° vs pri6/60°", _sat("A", 10), _pi(0, 10, 5), _sat("B", 6), _pi(0, 10, 60)),

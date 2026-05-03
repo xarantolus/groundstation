@@ -170,9 +170,9 @@ class DecoderService:
             pending = list(range(len(p.satellite.decoder)))
             p.decoders_pending = pending
             p.status = PassStatus.RECORDED
-            self._state.save_pass(p)
+            await self._state.save_pass_async(p)
             for idx in pending:
-                self._state.decode_put(p.id, idx, attempt=0)
+                await self._state.decode_put_async(p.id, idx, attempt=0)
                 self._enqueue((p.id, idx, 0))
                 await self._bus.publish(E.DecodeQueued(pass_id=p.id, decoder_index=idx))
         elif isinstance(event, E.RecordingStarted):
@@ -186,11 +186,11 @@ class DecoderService:
         p = self._passes.get(pass_id)
         if not p:
             logger.warning("decoder: pass %s unknown — dropping index %d", pass_id, decoder_index)
-            self._state.decode_tombstone(pass_id, decoder_index)
+            await self._state.decode_tombstone_async(pass_id, decoder_index)
             return
         if decoder_index >= len(p.satellite.decoder):
             logger.warning("decoder: index %d out of range for %s", decoder_index, pass_id)
-            self._state.decode_tombstone(pass_id, decoder_index)
+            await self._state.decode_tombstone_async(pass_id, decoder_index)
             return
 
         decoder = p.satellite.decoder[decoder_index]
@@ -201,15 +201,15 @@ class DecoderService:
             error = f"recording file missing at {p.recording_path}"
             logger.error("%s: %s", pass_id, error)
             p.decoders_failed.append(decoder_index)
-            self._state.save_pass(p)
-            self._state.decode_tombstone(pass_id, decoder_index)
+            await self._state.save_pass_async(p)
+            await self._state.decode_tombstone_async(pass_id, decoder_index)
             await self._bus.publish(
                 E.DecodeFailed(pass_id=pass_id, decoder_index=decoder_index, error=error)
             )
             return
 
         p.status = PassStatus.DECODING
-        self._state.save_pass(p)
+        await self._state.save_pass_async(p)
 
         loop = asyncio.get_running_loop()
 
@@ -325,7 +325,7 @@ class DecoderService:
                     next_attempt,
                     MAX_DECODE_ATTEMPTS - 1,
                 )
-                self._state.decode_put(pass_id, decoder_index, attempt=next_attempt)
+                await self._state.decode_put_async(pass_id, decoder_index, attempt=next_attempt)
                 self._enqueue((pass_id, decoder_index, next_attempt))
                 await self._bus.publish(
                     E.DecodeFailed(
@@ -337,8 +337,8 @@ class DecoderService:
                 )
                 return
             p.decoders_failed.append(decoder_index)
-            self._state.save_pass(p)
-            self._state.decode_tombstone(pass_id, decoder_index)
+            await self._state.save_pass_async(p)
+            await self._state.decode_tombstone_async(pass_id, decoder_index)
             await self._bus.publish(
                 E.DecodeFailed(pass_id=pass_id, decoder_index=decoder_index, error=error_text)
             )
@@ -352,8 +352,8 @@ class DecoderService:
         surviving = filter_decoder_outputs(output_dir, decoder, pass_dir=p.pass_dir)
         if not surviving:
             p.decoders_failed.append(decoder_index)
-            self._state.save_pass(p)
-            self._state.decode_tombstone(pass_id, decoder_index)
+            await self._state.save_pass_async(p)
+            await self._state.decode_tombstone_async(pass_id, decoder_index)
             constraints = []
             if decoder.min_files:
                 constraints.append(f"min_files={decoder.min_files}")
@@ -401,12 +401,12 @@ class DecoderService:
                     pass_id=pass_id,
                     label=f"{p.satellite.name} {decoder_name}/{os.path.basename(path)}",
                 )
-                self._state.transfer_put(req)
+                await self._state.transfer_put_async(req)
                 reqs.append(req)
 
             p.decoders_done.append(decoder_index)
-            self._state.save_pass(p)
-            self._state.decode_tombstone(pass_id, decoder_index)
+            await self._state.save_pass_async(p)
+            await self._state.decode_tombstone_async(pass_id, decoder_index)
 
             for req in reqs:
                 await self._bus.publish(E.TransferQueued(request=req))
@@ -446,7 +446,7 @@ class DecoderService:
         (minutes) and queue the .zst; then remove the .bin. Otherwise
         just remove the .bin."""
         p.status = PassStatus.DECODED if p.decoders_done else PassStatus.FAILED
-        self._state.save_pass(p)
+        await self._state.save_pass_async(p)
 
         iq = p.recording_path
         if iq and os.path.isfile(iq):
@@ -499,11 +499,11 @@ class DecoderService:
                         pass_id=p.id,
                         label=f"{p.satellite.name} IQ",
                     )
-                    self._state.transfer_put(req)
+                    await self._state.transfer_put_async(req)
                     await self._bus.publish(E.TransferQueued(request=req))
 
         p.status = PassStatus.DONE if p.decoders_done else PassStatus.FAILED
-        self._state.save_pass(p)
+        await self._state.save_pass_async(p)
 
     def _nas_path(self, p: Pass, *parts: str) -> str:
         prefix = os.path.join(
