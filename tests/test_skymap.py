@@ -307,3 +307,28 @@ def test_compute_azel_matches_predictor():
     # Repeatable
     az2, el2 = compute_azel(tle1, tle2, 52.0, 13.0, 50.0, when)
     assert az == az2 and el == el2
+
+
+def test_compute_azel_treats_naive_datetime_as_local():
+    """Regression: PassInfo.start_time is naive *local* time (set via
+    ephem.localtime in PassPredictor.passes_for). Earlier compute_azel
+    fed that straight to ephem.Date which assumes UTC, shifting the
+    satellite by the local UTC offset — for a LEO sat that's >1 orbit
+    later and produces wildly wrong (often deeply negative) elevations.
+
+    Verify by running the same instant as both naive-local and
+    tz-aware-utc and confirming the helper agrees on both — i.e. it's
+    correctly converting the naive value rather than silently treating
+    it as UTC."""
+    from auto.pass_predictor import compute_azel
+
+    tle1 = "1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9009"
+    tle2 = "2 25544  51.6400 100.0000 0001000  90.0000 270.0000 15.50000000 12349"
+    naive_local = datetime.datetime(2024, 1, 15, 12, 0, 0)
+    aware_utc = naive_local.astimezone(datetime.timezone.utc)
+
+    az_naive, el_naive = compute_azel(tle1, tle2, 52.0, 13.0, 50.0, naive_local)
+    az_utc, el_utc = compute_azel(tle1, tle2, 52.0, 13.0, 50.0, aware_utc)
+    # Same physical instant → same az/el regardless of representation.
+    assert abs(az_naive - az_utc) < 0.01
+    assert abs(el_naive - el_utc) < 0.01

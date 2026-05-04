@@ -347,13 +347,27 @@ def compute_azel(
     when: datetime.datetime,
 ) -> Tuple[float, float]:
     """Compute (azimuth, elevation) in degrees of the satellite described by
-    ``(tle1, tle2)`` as seen from the observer at the given time."""
+    ``(tle1, tle2)`` as seen from the observer at the given time.
+
+    ``when`` may be naive (interpreted as local time, matching the
+    convention of ``PassInfo.start_time`` which is set via
+    ``ephem.localtime``) or tz-aware. ephem expects UTC, so naive
+    datetimes are converted via the system's local-time interpretation.
+    Passing a naive datetime as if it were UTC silently shifts the
+    satellite by the local UTC offset — for a LEO sat that's well over
+    one orbit and az/el ends up arbitrary."""
+    if when.tzinfo is None:
+        when = when.astimezone(datetime.timezone.utc)
+    else:
+        when = when.astimezone(datetime.timezone.utc)
     observer = ephem.Observer()
     observer.lat = str(lat)
     observer.lon = str(lon)
     observer.elev = alt_m / 1000
     observer.horizon = "0"
-    observer.date = ephem.Date(when)
+    # ephem.Date accepts a naive datetime as UTC; we just normalised to
+    # UTC above so strip the tzinfo to keep ephem happy.
+    observer.date = ephem.Date(when.replace(tzinfo=None))
     sat_body = ephem.readtle("sat", tle1, tle2)
     sat_body.compute(observer)
     az = float(sat_body.az) * 180 / ephem.pi
