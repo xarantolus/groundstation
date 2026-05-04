@@ -701,6 +701,12 @@ function drawCoastlines(ctx, w, h){
   ctx.strokeStyle = '#7a8a96';
   ctx.lineWidth = Math.max(1.0, w * 0.0015);
   ctx.beginPath();
+  // projectLL wraps each point's dlon to (-180, 180] independently. When two
+  // consecutive vertices straddle the centerLon ± 180 line (e.g. Bering coast
+  // on a Europe-centered map), they land on opposite edges of the canvas, and
+  // a lineTo would draw a horizontal streak across the whole map. Break the
+  // path on any large X jump.
+  const jumpThresh = w * 0.5;
   for (const feat of gj.features){
     const geom = feat.geometry;
     if (!geom) continue;
@@ -709,11 +715,16 @@ function drawCoastlines(ctx, w, h){
                 : null;
     if (!lines) continue;
     for (const line of lines){
+      let prevX = null;
       for (let i = 0; i < line.length; i++){
         const [lon, lat] = line[i];
         const [x, y] = projectLL(lon, lat, w, h);
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+        if (prevX != null && Math.abs(x - prevX) <= jumpThresh){
+          ctx.lineTo(x, y);
+        } else {
+          ctx.moveTo(x, y);
+        }
+        prevX = x;
       }
     }
   }
@@ -870,12 +881,15 @@ function drawTrackPolyline(ctx, p, samples, w, h, threshold, opts){
   const win = recordingWindow(p);
   ctx.lineWidth = opts.lineWidth;
   ctx.globalAlpha = opts.alpha;
+  const jumpThresh = w * 0.5;
   let prev = null;
   for (let i = 0; i < samples.length; i++){
     const s = samples[i];
     const [x, y] = projectLL(s.lon, s.lat, w, h);
     const cur = {x, y, lon: s.lon, lat: s.lat, el: s.el, t: s.t};
-    if (prev){
+    // Skip the segment when consecutive samples land on opposite canvas edges
+    // — happens when a track crosses the meridian opposite to the station.
+    if (prev && Math.abs(cur.x - prev.x) <= jumpThresh){
       const segs = colorSegments(prev, cur, threshold, win);
       for (const seg of segs){
         const x0 = prev.x + (cur.x - prev.x) * seg.f0;
@@ -929,11 +943,17 @@ function drawFootprint(ctx, w, h, lat, lon, alt_km, color, elevationDeg){
   ctx.strokeStyle = color + 'aa';
   ctx.lineWidth = Math.max(1, w * 0.001);
   ctx.beginPath();
+  const jumpThresh = w * 0.5;
+  let prevX = null;
   for (let i = 0; i < ring.length; i++){
     const [lonp, latp] = ring[i];
     const [x, y] = projectLL(lonp, latp, w, h);
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+    if (prevX != null && Math.abs(x - prevX) <= jumpThresh){
+      ctx.lineTo(x, y);
+    } else {
+      ctx.moveTo(x, y);
+    }
+    prevX = x;
   }
   ctx.stroke();
 }
