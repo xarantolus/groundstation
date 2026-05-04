@@ -596,12 +596,22 @@ function effectiveSelectedPassId(){
   const now = Date.now();
   if (state.selected_pass_id){
     const exists = state.passes.find(x => x.id === state.selected_pass_id);
-    // Honour the manual pin only while it's still relevant (within trail-out).
-    // Once a pinned pass ages past that window, drop the pin so the auto-pick
-    // can promote whatever is live or coming up next.
+    // Honour the manual pin while the pinned pass is live, and into its
+    // trail-out window. But once the pinned pass has ended, if a different
+    // pass is currently live, drop the pin so the live one becomes primary
+    // instead of getting hidden behind a 3-minute trail hold.
     if (exists){
-      const trailEnd = +new Date(exists.pass_info.end_time) + TRACK_TRAIL_MS;
-      if (trailEnd >= now) return state.selected_pass_id;
+      const rawEnd = +new Date(exists.pass_info.end_time);
+      if (now <= rawEnd) return state.selected_pass_id;
+      const trailEnd = rawEnd + TRACK_TRAIL_MS;
+      if (trailEnd >= now){
+        const otherLive = state.passes.some(p => {
+          if (p.id === state.selected_pass_id) return false;
+          const s = +new Date(p.pass_info.start_time), e = +new Date(p.pass_info.end_time);
+          return s <= now && now <= e;
+        });
+        if (!otherLive) return state.selected_pass_id;
+      }
     }
     state.selected_pass_id = null;
   }
@@ -620,8 +630,25 @@ function pickOverlayPasses(selectedId){
   if (!selectedId) return [];
   const idx = state.passes.findIndex(p => p.id === selectedId);
   if (idx < 0) return [];
-  const tail = state.passes.slice(idx + 1).filter(p => +new Date(p.pass_info.end_time) > Date.now());
-  return tail.slice(0, 2);
+  const main = state.passes[idx];
+  const mainStart = +new Date(main.pass_info.start_time);
+  const mainEnd = +new Date(main.pass_info.end_time);
+  const now = Date.now();
+  // Always include passes whose time window overlaps the main's, even if they
+  // started earlier and sit at a lower index — otherwise pinning the later of
+  // two concurrent passes would hide the earlier one.
+  const concurrent = state.passes.filter((p, i) => {
+    if (i === idx) return false;
+    const e = +new Date(p.pass_info.end_time);
+    if (e < now) return false;
+    const s = +new Date(p.pass_info.start_time);
+    return s <= mainEnd && e >= mainStart;
+  });
+  const seen = new Set(concurrent.map(p => p.id));
+  const tail = state.passes
+    .slice(idx + 1)
+    .filter(p => !seen.has(p.id) && +new Date(p.pass_info.end_time) > now);
+  return [...concurrent, ...tail].slice(0, 2);
 }
 
 /* ---------- Canvas DPR fitting ---------- */
@@ -974,11 +1001,12 @@ function drawStationMarker(ctx, w, h){
   ctx.stroke();
 }
 
-function drawSatDot(ctx, w, h, lat, lon){
+function drawSatDot(ctx, w, h, lat, lon, opts){
+  opts = opts || {};
   const [x, y] = projectLL(lon, lat, w, h);
   const r = Math.max(3, w * 0.006);
-  ctx.fillStyle = '#fff';
-  ctx.strokeStyle = '#00bcd4';
+  ctx.fillStyle = opts.fill || '#fff';
+  ctx.strokeStyle = opts.stroke || '#00bcd4';
   ctx.lineWidth = 2;
   ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
 }
@@ -1107,6 +1135,20 @@ function renderTrackingMap(ctx, w, h, mainPass, overlays){
       lineWidth: Math.max(1, w * 0.002),
       alpha: 0.28,
     });
+    // Concurrent passes need their own footprint/dot so the user can see where
+    // the secondary satellite is, just toned down so the active pass stays
+    // visually primary.
+    if (passInExtendedWindow(op)){
+      const sr = getSatrec(op);
+      const sub = sr ? propagate(sr, new Date()) : null;
+      if (sub){
+        const prevAlpha = ctx.globalAlpha;
+        ctx.globalAlpha = 0.5;
+        drawFootprint(ctx, w, h, sub.lat, sub.lon, sub.alt_km, '#90a4ae', state.threshold_deg);
+        drawSatDot(ctx, w, h, sub.lat, sub.lon, {fill: '#cfd8dc', stroke: '#90a4ae'});
+        ctx.globalAlpha = prevAlpha;
+      }
+    }
     labelJobs.push({p: op, samples, alpha: 0.55, textColor: '#cfd8dc'});
   }
 
