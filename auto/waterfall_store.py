@@ -34,6 +34,17 @@ class WaterfallStore:
     def has(self, pass_id: str) -> bool:
         return (self.root / f"{pass_id}.png").is_file()
 
+    def has_many(self, pass_ids: list[str]) -> dict[str, bool]:
+        try:
+            present = {
+                p.stem
+                for p in self.root.iterdir()
+                if p.is_file() and p.suffix == ".png"
+            }
+        except OSError:
+            return {pid: False for pid in pass_ids}
+        return {pid: pid in present for pid in pass_ids}
+
     def persist(self, pass_id: str, src_path: str | Path) -> Optional[Path]:
         src = Path(src_path)
         if not src.is_file():

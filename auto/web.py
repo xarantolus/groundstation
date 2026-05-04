@@ -107,24 +107,51 @@ class WebService:
     def stop(self) -> None:
         self._stop.set()
 
-    def _decorate_pass(self, pass_dict: Dict[str, Any]) -> None:
-        pid = pass_dict.get("id")
-        pass_dict["has_waterfall"] = bool(pid) and self._waterfalls.has(pid)
-
-    def _decorate_event_payload(self, event_dict: Dict[str, Any]) -> None:
-        if "pass" in event_dict and isinstance(event_dict["pass"], dict):
-            self._decorate_pass(event_dict["pass"])
-        passes = event_dict.get("passes")
+    def _collect_pass_ids(self, payload: Dict[str, Any]) -> List[str]:
+        ids: List[str] = []
+        p = payload.get("pass")
+        if isinstance(p, dict):
+            pid = p.get("id")
+            if pid:
+                ids.append(pid)
+        passes = payload.get("passes")
         if isinstance(passes, list):
-            for p in passes:
-                if isinstance(p, dict):
-                    self._decorate_pass(p)
+            for entry in passes:
+                if isinstance(entry, dict):
+                    pid = entry.get("id")
+                    if pid:
+                        ids.append(pid)
+        return ids
+
+    async def _waterfall_map(self, pass_ids: List[str]) -> Dict[str, bool]:
+        if not pass_ids:
+            return {}
+        unique = list(set(pass_ids))
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self._waterfalls.has_many, unique
+        )
+
+    def _apply_waterfall_map(
+        self, payload: Dict[str, Any], has_map: Dict[str, bool]
+    ) -> None:
+        p = payload.get("pass")
+        if isinstance(p, dict):
+            pid = p.get("id")
+            p["has_waterfall"] = bool(pid) and has_map.get(pid, False)
+        passes = payload.get("passes")
+        if isinstance(passes, list):
+            for entry in passes:
+                if isinstance(entry, dict):
+                    pid = entry.get("id")
+                    entry["has_waterfall"] = bool(pid) and has_map.get(pid, False)
 
     async def _broadcast_event(self, event: E.Event) -> None:
         if not self._sockets:
             return
         event_dict = event.model_dump(mode="json", by_alias=True)
-        self._decorate_event_payload(event_dict)
+        has_map = await self._waterfall_map(self._collect_pass_ids(event_dict))
+        self._apply_waterfall_map(event_dict, has_map)
         payload = {"kind": "event", "event": event_dict}
         message = json.dumps(payload, default=str)
         stale: List[web.WebSocketResponse] = []
@@ -153,7 +180,8 @@ class WebService:
         if not _SAFE_NAME.match(name):
             raise web.HTTPNotFound()
         path = STATIC_DIR / name
-        if not path.is_file():
+        loop = asyncio.get_running_loop()
+        if not await loop.run_in_executor(None, path.is_file):
             raise web.HTTPNotFound()
         return web.FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
 
@@ -161,7 +189,10 @@ class WebService:
         pass_id = request.match_info["pass_id"]
         if not _SAFE_NAME.match(pass_id):
             raise web.HTTPNotFound()
-        path = self._waterfalls.path_for(pass_id)
+        loop = asyncio.get_running_loop()
+        path = await loop.run_in_executor(
+            None, self._waterfalls.path_for, pass_id
+        )
         if path is None:
             raise web.HTTPNotFound()
         return web.FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
@@ -197,9 +228,8 @@ class WebService:
         await ws.prepare(request)
         self._sockets.append(ws)
         snap = self._view.snapshot().model_dump(mode="json")
-        for p in snap.get("passes", []):
-            if isinstance(p, dict):
-                self._decorate_pass(p)
+        has_map = await self._waterfall_map(self._collect_pass_ids(snap))
+        self._apply_waterfall_map(snap, has_map)
         snap["station"] = {
             "lat": self._cfg.location_lat,
             "lon": self._cfg.location_lon,
