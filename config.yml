@@ -5,7 +5,7 @@ satellites:
     bandwidth: 150e3
     sample_rate: 384e3
     lo_offset: 100e3
-    priority: 10
+    priority: 7
     decoder:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: lrpt
@@ -20,12 +20,13 @@ satellites:
         env:
           PIPELINE_NAME: meteor_m2-x_lrpt
         min_files: 6
-      # - name: x_lrpt_80k
-      #   container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
-      #   args: --satellite_number=M2-3 --fill_missing
-      #   env:
-      #     PIPELINE_NAME: meteor_m2-x_lrpt_80k
-      #   min_files: 6
+      - name: x_lrpt_80k
+        container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
+        args: --satellite_number=M2-3 --fill_missing
+        env:
+          PIPELINE_NAME: meteor_m2-x_lrpt_80k
+        min_files: 6
+        timeout_minutes: 2
     iq_upload: never
     doppler_correction: false
 
@@ -35,7 +36,7 @@ satellites:
     bandwidth: 150e3
     sample_rate: 384e3
     lo_offset: 100e3
-    priority: 10
+    priority: 7
     decoder:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: lrpt
@@ -50,12 +51,13 @@ satellites:
         env:
           PIPELINE_NAME: meteor_m2-x_lrpt
         min_files: 6
-      # - name: x_lrpt_80k
-      #   container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
-      #   args: --satellite_number=M2-4 --fill_missing
-      #   env:
-      #     PIPELINE_NAME: meteor_m2-x_lrpt_80k
-      #   min_files: 6
+      - name: x_lrpt_80k
+        container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
+        args: --satellite_number=M2-4 --fill_missing
+        env:
+          PIPELINE_NAME: meteor_m2-x_lrpt_80k
+        min_files: 6
+        timeout_minutes: 2
     iq_upload: never
     doppler_correction: false
 
