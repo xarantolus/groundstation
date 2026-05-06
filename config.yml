@@ -28,7 +28,7 @@ satellites:
         min_files: 6
         timeout_minutes: 2
     iq_upload: never
-    doppler_correction: false
+
 
   - name: Meteor M2-4
     norad: 59051
@@ -59,7 +59,7 @@ satellites:
         min_files: 6
         timeout_minutes: 2
     iq_upload: never
-    doppler_correction: false
+
 
   # AX100 satellites
   - name: AISTECHSAT-2
@@ -77,8 +77,8 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-    iq_upload: always
-    doppler_correction: false
+    iq_upload: on_decode
+
 
   - name: CATSAT
     norad: 60246
@@ -110,8 +110,8 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-    iq_upload: always
-    doppler_correction: false
+    iq_upload: on_decode
+
 
   - name: K-HERO
     norad: 66660
@@ -128,6 +128,8 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+    iq_upload: on_decode
+
   - name: Luojia-1
     norad: 43485
     frequency: 437.250e6
@@ -144,7 +146,7 @@ satellites:
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
     iq_upload: always
-    doppler_correction: false
+
   - name: MIMAN
     norad: 52900
     frequency: 436.500e6
@@ -160,8 +162,8 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-    iq_upload: always
-    doppler_correction: false
+    iq_upload: on_decode
+
   - name: NUSHSAT-1
     norad: 63211
     frequency: 436.200e6
@@ -177,8 +179,8 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-    iq_upload: always
-    doppler_correction: false
+    iq_upload: on_decode
+
   - name: SNIPE-1
     norad: 56749
     frequency: 435.450e6
@@ -194,8 +196,8 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-    doppler_correction: false
-    iq_upload: always
+
+    iq_upload: on_decode
   - name: SNIPE-2
     norad: 56745
     frequency: 436.000e6
@@ -211,8 +213,8 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-    doppler_correction: false
-    iq_upload: always
+
+    iq_upload: on_decode
   - name: SNIPE-4
     norad: 56744
     frequency: 437.800e6
@@ -228,8 +230,8 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-    doppler_correction: false
-    iq_upload: always
+
+    iq_upload: on_decode
   - name: Suomi 100
     norad: 43804
     frequency: 437.775e6
@@ -245,6 +247,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+    iq_upload: on_decode
   - name: UND ROADS 1
     norad: 64535
     frequency: 435.400e6
@@ -260,8 +263,8 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-    doppler_correction: false
-    iq_upload: always
+
+    iq_upload: on_decode
   - name: UND ROADS 2
     norad: 64549
     frequency: 435.400e6
@@ -277,6 +280,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+    iq_upload: on_decode
   - name: BEE-1000
     norad: 66650
     frequency: 436.500e6
@@ -292,6 +296,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+    iq_upload: on_decode
 
   # Image-producing satellites (SatDump pipelines)
   - name: StratoSat-TK1
