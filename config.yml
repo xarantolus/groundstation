@@ -311,6 +311,7 @@ satellites:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: geoscan
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
+        min_size_bytes: 1
         env:
           PIPELINE_NAME: stratosat_tk1_uhf
 
@@ -326,6 +327,7 @@ satellites:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: geoscan
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
+        min_size_bytes: 1
         env:
           PIPELINE_NAME: rtumirea1_uhf
     gain: 30
@@ -342,6 +344,7 @@ satellites:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: geoscan
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
+        min_size_bytes: 1
         env:
           PIPELINE_NAME: tusur_go_uhf
 
@@ -357,6 +360,7 @@ satellites:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: geoscan
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
+        min_size_bytes: 1
         env:
           PIPELINE_NAME: vizard_ion_uhf
 
@@ -372,6 +376,7 @@ satellites:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: geoscan
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
+        min_size_bytes: 1
         env:
           PIPELINE_NAME: colibri_s_uhf
 
@@ -387,6 +392,7 @@ satellites:
       - name: sstv_robot36
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
         args: --sstv_mode=Robot36 --satellite_norad=67290 --satellite_frequency=437.350e6 --enable_doppler=true --bandwidth=12500
+        min_size_bytes: 1
         env:
           PIPELINE_NAME: sstv_decoder
 
@@ -402,6 +408,7 @@ satellites:
       - name: sstv_robot36
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
         args: --sstv_mode=Robot36 --satellite_norad=67284 --satellite_frequency=436.320e6 --enable_doppler=true --bandwidth=12500
+        min_size_bytes: 1
         env:
           PIPELINE_NAME: sstv_decoder
 
