@@ -14,7 +14,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "crcmod", specifier = ">=1.7" },
-    { name = "libcsp-py3", git = "https://github.com/xarantolus/libcsp.git?rev=libcsp-2-1-python" },
+    { name = "libcsp-py3", git = "https://github.com/xarantolus/libcsp.git?rev=main" },
 ]
 
 [[package]]
@@ -26,4 +26,4 @@ sdist = { url = "https://files.pythonhosted.org/packages/6b/b0/e595ce2a2527e169c
 [[package]]
 name = "libcsp-py3"
 version = "2.1.0"
-source = { git = "https://github.com/xarantolus/libcsp.git?rev=libcsp-2-1-python#536e64494efcf11ae99e0496c7b759ec3d507a40" }
+source = { git = "https://github.com/xarantolus/libcsp.git?rev=main#ed8243a1a0429a06f7f035163235063ad6deec7d" }

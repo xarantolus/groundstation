@@ -20,13 +20,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY csp_helpers.py decode.py deframe.py /app/
 
 COPY ax100_decoder.grc /tmp/ax100_decoder.grc
-RUN set -e; cd /tmp; \
-	if grcc ax100_decoder.grc; then \
-		mv ax100_decoder.py /usr/local/bin/ax100_decoder.py; \
-	else \
-		printf '#!/bin/sh\necho "ax100_decoder.grc failed to compile; skipping GNU Radio stage" >&2\n' \
-			> /usr/local/bin/ax100_decoder.py; \
-	fi; \
+RUN grcc ax100_decoder.grc && \
+	mv ax100_decoder.py /usr/local/bin/ax100_decoder.py && \
 	chmod +x /usr/local/bin/ax100_decoder.py
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
