@@ -68,6 +68,10 @@ RUN --mount=type=cache,target=/var/cache/apt \
 COPY satdump.sh /usr/bin/satdump.sh
 RUN chmod +x /usr/bin/satdump.sh
 
+# Baked-in SatDump settings (disables Kepler/TLE auto-update); satdump.sh copies
+# this into $HOME/.config/satdump/settings.json at runtime.
+COPY settings.json /etc/groundstation/satdump-settings.json
+
 WORKDIR /srv
 
 ENTRYPOINT ["/usr/bin/satdump.sh"]

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import datetime
 import logging
-from typing import Dict, List, Optional, Tuple
+import time
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple, Union
 
 import ephem
 import requests
@@ -12,10 +14,65 @@ from .models import PassInfo, Satellite
 logger = logging.getLogger("groundstation.predictor")
 
 
+def _parse_tle(text: Optional[str]) -> Optional[Tuple[str, str]]:
+    """Extract the (line1, line2) pair from a TLE/3LE blob, or None if absent.
+    Tolerates a leading name line and trailing whitespace."""
+    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
+    if len(lines) >= 3:
+        return (lines[-2], lines[-1])
+    if len(lines) == 2:
+        return (lines[0], lines[1])
+    return None
+
+
 class PassPredictor:
-    def __init__(self, n2yo_api_key: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        n2yo_api_key: Optional[str] = None,
+        cache_dir: Optional[Union[str, Path]] = None,
+    ) -> None:
         self._n2yo_api_key = n2yo_api_key
         self._tle_cache: Dict[str, Tuple[str, str]] = {}
+        # Last-known-good TLEs persisted to disk so a celestrak outage (or a
+        # restart during one) doesn't leave us with zero TLEs — and therefore
+        # zero predicted passes and a blank map. On a network failure we fall
+        # back to the on-disk copy: the same elements last used to compute this
+        # satellite's overpasses.
+        self._cache_dir: Optional[Path] = Path(cache_dir) if cache_dir else None
+
+    def _disk_path(self, norad: str) -> Optional[Path]:
+        if self._cache_dir is None:
+            return None
+        return self._cache_dir / f"{norad}.tle"
+
+    def _save_tle_disk(self, norad: str, tle: Tuple[str, str]) -> None:
+        path = self._disk_path(norad)
+        if path is None:
+            return
+        try:
+            self._cache_dir.mkdir(parents=True, exist_ok=True)  # type: ignore[union-attr]
+            tmp = path.with_name(path.name + ".tmp")
+            tmp.write_text(f"{tle[0]}\n{tle[1]}\n", encoding="utf-8")
+            tmp.replace(path)
+        except OSError:
+            logger.warning("could not persist TLE for %s to disk", norad, exc_info=True)
+
+    def _load_tle_disk(self, norad: str) -> Optional[Tuple[str, str]]:
+        path = self._disk_path(norad)
+        if path is None:
+            return None
+        try:
+            tle = _parse_tle(path.read_text(encoding="utf-8"))
+            age_h = (time.time() - path.stat().st_mtime) / 3600.0
+        except OSError:
+            return None
+        if tle is not None:
+            logger.warning(
+                "using cached on-disk TLE for %s (%.1f h old) — network unavailable",
+                norad,
+                age_h,
+            )
+        return tle
 
     def fetch_tle(self, norad: str) -> Tuple[str, str]:
         if norad in self._tle_cache:
@@ -40,20 +97,25 @@ class PassPredictor:
                     r.raise_for_status()
                     tle_text = r.json().get("tle", "")
                 except Exception as ex:
-                    raise RuntimeError(f"could not fetch TLE for {norad}") from ex
-            else:
-                raise RuntimeError(f"could not fetch TLE for {norad}") from e
+                    logger.error("n2yo TLE fetch failed for %s: %s", norad, ex)
 
-        lines = [line.strip() for line in (tle_text or "").splitlines() if line.strip()]
-        if len(lines) >= 3:
-            tle = (lines[-2], lines[-1])
-        elif len(lines) == 2:
-            tle = (lines[0], lines[1])
-        else:
-            raise RuntimeError(f"unexpected TLE format for {norad}")
+        tle = _parse_tle(tle_text)
+        if tle is not None:
+            # Fresh elements: cache in memory for this run and persist for later.
+            self._tle_cache[norad] = tle
+            self._save_tle_disk(norad, tle)
+            return tle
 
-        self._tle_cache[norad] = tle
-        return tle
+        # Network/parse failed — fall back to the last-known-good on disk.
+        # Deliberately not stored in _tle_cache so the next prediction cycle
+        # retries the network and recovers once celestrak is reachable again.
+        disk = self._load_tle_disk(norad)
+        if disk is not None:
+            return disk
+
+        raise RuntimeError(
+            f"could not fetch TLE for {norad} and no cached copy on disk"
+        )
 
     def passes_for(
         self,

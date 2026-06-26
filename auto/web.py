@@ -24,6 +24,36 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 
+# The Pass model carries full backend state, but the UI only reads a handful of
+# fields. The embedded Satellite config (especially its per-pass `decoder` list,
+# duplicated across hundreds of passes) dominates the snapshot — ~60% of it — yet
+# the frontend only uses satellite.name/norad. Slim each Pass to the wire shape
+# the UI actually consumes; this is applied to both the initial snapshot and the
+# per-event `pass`/`passes` payloads. Full snapshots are still sent — just smaller.
+_SATELLITE_WIRE_KEEP = ("name", "norad")
+_PASS_WIRE_DROP = (
+    "pass_dir",
+    "recording_path",
+    "decoders_pending",
+    "decoders_done",
+    "decoders_failed",
+    "iq_consumers_pending",
+    "iq_consumers_done",
+    "iq_upload_confirmed",
+    "interrupted",
+    "created_at",
+    "updated_at",
+)
+
+
+def _slim_pass_for_wire(entry: Dict[str, Any]) -> None:
+    """Strip a serialized Pass dict in place down to what the UI renders."""
+    sat = entry.get("satellite")
+    if isinstance(sat, dict):
+        entry["satellite"] = {k: sat[k] for k in _SATELLITE_WIRE_KEEP if k in sat}
+    for k in _PASS_WIRE_DROP:
+        entry.pop(k, None)
+
 
 class WebService:
     def __init__(
@@ -139,12 +169,14 @@ class WebService:
         if isinstance(p, dict):
             pid = p.get("id")
             p["has_waterfall"] = bool(pid) and has_map.get(pid, False)
+            _slim_pass_for_wire(p)
         passes = payload.get("passes")
         if isinstance(passes, list):
             for entry in passes:
                 if isinstance(entry, dict):
                     pid = entry.get("id")
                     entry["has_waterfall"] = bool(pid) and has_map.get(pid, False)
+                    _slim_pass_for_wire(entry)
 
     async def _broadcast_event(self, event: E.Event) -> None:
         if not self._sockets:

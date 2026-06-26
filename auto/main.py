@@ -321,7 +321,10 @@ async def _run(cfg: GroundstationConfig, no_tui: bool) -> None:
         run_subscriber(view_sub, view.apply, "view"), name="view_updater"
     )
 
-    predictor = PassPredictor(n2yo_api_key=cfg.n2yo_api_key)
+    predictor = PassPredictor(
+        n2yo_api_key=cfg.n2yo_api_key,
+        cache_dir=state.root / "tle_cache",
+    )
 
     def _on_gate_change(open_: bool, reason: str) -> None:
         loop.create_task(

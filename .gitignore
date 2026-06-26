@@ -10,6 +10,8 @@ notes.md
 *info*.json*
 *.gz*
 *.state
+# Runtime state dir (passes, transfer queues, persisted TLE cache, …)
+/state/
 **__pycache__**
 *.raw
 !.github/img/*
