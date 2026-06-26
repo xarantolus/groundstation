@@ -2,6 +2,8 @@
 recordings
 *.png
 flowgraphs/*.py
+backup
+notes.md
 *.env*
 *.bin
 *.zst*
