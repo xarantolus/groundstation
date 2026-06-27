@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 import logging
 import re
@@ -45,6 +46,34 @@ _PASS_WIRE_DROP = (
     "updated_at",
 )
 
+_PASS_INFO_TIME_FIELDS = (
+    "start_time",
+    "max_time",
+    "end_time",
+    "recording_start_override",
+    "recording_end_override",
+)
+
+
+def _localize_iso(value: Any) -> Any:
+    """Attach the server's local UTC offset to a naive ISO timestamp string.
+
+    Already-aware timestamps and non-strings pass through unchanged.
+    ``astimezone()`` on a naive datetime assumes the system local zone and is
+    DST-correct for that date — and crucially attaches the same zone that
+    ``ephem.localtime`` used to build the value, so it stays self-consistent
+    whatever timezone the server runs in.
+    """
+    if not isinstance(value, str):
+        return value
+    try:
+        dt = datetime.datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if dt.tzinfo is None:
+        dt = dt.astimezone()
+    return dt.isoformat()
+
 
 def _slim_pass_for_wire(entry: Dict[str, Any]) -> None:
     """Strip a serialized Pass dict in place down to what the UI renders."""
@@ -53,6 +82,11 @@ def _slim_pass_for_wire(entry: Dict[str, Any]) -> None:
         entry["satellite"] = {k: sat[k] for k in _SATELLITE_WIRE_KEEP if k in sat}
     for k in _PASS_WIRE_DROP:
         entry.pop(k, None)
+    pass_info = entry.get("pass_info")
+    if isinstance(pass_info, dict):
+        for k in _PASS_INFO_TIME_FIELDS:
+            if pass_info.get(k) is not None:
+                pass_info[k] = _localize_iso(pass_info[k])
 
 
 class WebService:
