@@ -3,6 +3,9 @@ This repository contains code and documentation for my custom satellite ground s
 
 ![NOAA APT Image](.github/img/noaa_apt.png)
 
+It has a web UI that shows the currently tracked satellites, signal waterfalls and more info:
+
+![Web UI Screenshot](.github/img/web_ui.png)
 
 ### Hardware Components
 My ground station uses a [Diamond D-3000 Discone 25-3000 MHz N](https://www.wimo.com/de/d-3000n) antenna, which means that I don't need a rotor.
