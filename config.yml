@@ -1,4 +1,20 @@
 satellites:
+  - name: ASRTU-1
+    norad: 61781
+    frequency: 435.400e6
+    bandwidth: 24e3
+    sample_rate: 96e3
+    lo_offset: 20e3
+    priority: 15
+    iq_upload: always
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: lrpt
+        container: ghcr.io/xarantolus/groundstation/gr-satellites:latest
+        env:
+          SATELLITE: ASRTU-1
+          SAMP_RATE: 48000
+
   - name: Meteor M2-3
     norad: 57166
     frequency: 137.900e6
