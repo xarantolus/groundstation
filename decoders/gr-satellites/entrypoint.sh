@@ -17,4 +17,5 @@ gr_satellites \
 	--ignore_unknown_args \
 	--kiss_out "${OUTPUT_DIR:-/output}/frames.kiss" \
 	--telemetry_output "${OUTPUT_DIR:-/output}/telemetry.log" \
-	"$@"
+	"$@" \
+	2>&1 | tee "${OUTPUT_DIR:-/output}/gr_satellites.log"
