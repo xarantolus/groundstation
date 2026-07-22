@@ -91,7 +91,7 @@ def load_config(path: str) -> GroundstationConfig:
             )
             raise SystemExit(2) from None
 
-        if sat.iq_upload != "never" and not sat.decoder:
+        if sat.iq_upload == "on_decode" and not sat.decoder:
             raise SystemExit(
                 f"{path}: satellites[{idx}] ({sat.name}): "
                 f"iq_upload={sat.iq_upload!r} requires at least one decoder"
