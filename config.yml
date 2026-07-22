@@ -13,7 +13,7 @@ satellites:
         container: ghcr.io/xarantolus/groundstation/gr-satellites:latest
         env:
           SATELLITE: ASRTU-1
-          SAMP_RATE: 48000
+          SAMP_RATE: 96000
 
   - name: Meteor M2-3
     norad: 57166
