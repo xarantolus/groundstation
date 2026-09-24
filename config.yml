@@ -1,4 +1,27 @@
 satellites:
+  - name: SpaceTeamSat-1
+    norad: 99416
+    frequency: 437.395e6
+    bandwidth: 48e3
+    sample_rate: 384e3
+    lo_offset: 100e3
+    priority: 60
+    iq_upload: always
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+
+  - name: FramSat-1
+    norad: 98914
+    frequency: 435.141e6
+    bandwidth: 48e3
+    sample_rate: 384e3
+    lo_offset: 100e3
+    priority: 60
+    iq_upload: always
+    decoder:
+      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+
+
   - name: ASRTU-1
     norad: 61781
     frequency: 435.400e6
