@@ -5,7 +5,7 @@ satellites:
     bandwidth: 48e3
     sample_rate: 384e3
     lo_offset: 100e3
-    priority: 60
+    priority: 61
     iq_upload: always
     decoder:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
