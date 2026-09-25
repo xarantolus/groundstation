@@ -1,6 +1,6 @@
 satellites:
   - name: SpaceTeamSat-1
-    norad: 99416
+    norad: 100612
     frequency: 437.395e6
     bandwidth: 48e3
     sample_rate: 384e3
@@ -11,7 +11,7 @@ satellites:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
 
   - name: FramSat-1
-    norad: 98914
+    norad: 100610
     frequency: 435.141e6
     bandwidth: 48e3
     sample_rate: 384e3
