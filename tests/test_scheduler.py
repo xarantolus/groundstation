@@ -44,8 +44,7 @@ def _pi(start: datetime.datetime, duration_min: float = 5.0) -> PassInfo:
         max_azimuth=90,
         end_azimuth=180,
         duration_minutes=duration_min,
-        tle1="t1",
-        tle2="t2",
+        omm={},
     )
 
 

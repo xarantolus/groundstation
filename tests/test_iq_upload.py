@@ -36,7 +36,7 @@ def _make_pass(sat: Satellite, *, decoders_done: list[int]) -> Pass:
         end_time=_dt.datetime(2026, 1, 1, 0, 10, 0),
         start_elevation=0.0, max_elevation=45.0, end_elevation=0.0,
         start_azimuth=0.0, max_azimuth=180.0, end_azimuth=359.0,
-        duration_minutes=10.0, tle1="x", tle2="y",
+        duration_minutes=10.0, omm={},
     )
     return Pass(
         id="p1", satellite=sat, pass_info=info, pass_dir="/tmp/x",

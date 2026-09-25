@@ -5,11 +5,12 @@ import logging
 import os
 import time
 
-import ephem
+import numpy as np
+
+from . import orbit
 
 logger = logging.getLogger("groundstation.doppler")
 
-_C_M_S = 299_792_458.0
 
 DEFAULT_TIME_STEP_S = 0.1
 
@@ -22,8 +23,7 @@ def _to_utc(dt: datetime.datetime) -> datetime.datetime:
 
 def write_doppler_file(
     *,
-    tle1: str,
-    tle2: str,
+    omm: dict,
     sat_name: str,
     lat: float,
     lon: float,
@@ -48,12 +48,8 @@ def write_doppler_file(
     if time_step_s <= 0:
         raise ValueError("time_step_s must be > 0")
 
-    sat_body = ephem.readtle(sat_name, tle1, tle2)
-    observer = ephem.Observer()
-    observer.lat = str(lat)
-    observer.lon = str(lon)
-    observer.elev = alt_m
-    observer.pressure = 0  # disable refraction — irrelevant for range rate
+    sat_body = orbit.make_satellite(omm)
+    topos = orbit.observer(lat, lon, alt_m)
 
     start_utc = _to_utc(start)
     end_utc = _to_utc(end)
@@ -74,17 +70,16 @@ def write_doppler_file(
     # Build the whole file in memory and write once: the Pi's /tmp has
     # high I/O latency and per-line writes through the default 8KB buffer
     # still triggered ~20 flushes per file.
-    parts: list[str] = []
     start_ts = start_utc.timestamp()
-    naive_start = start_utc.replace(tzinfo=None)
-    for i in range(n_samples):
-        offset = i * time_step_s
-        observer.date = naive_start + datetime.timedelta(seconds=offset)
-        sat_body.compute(observer)
-        # range_velocity > 0 when the satellite is receding.
-        range_rate = float(sat_body.range_velocity)
-        doppler_hz = -range_rate / _C_M_S * f_carrier
-        parts.append(f"{start_ts + offset - anchor_ts}\t{doppler_hz}\n")
+    offsets = np.arange(n_samples) * time_step_s
+    ts = orbit.timescale()
+    t = ts.tt_jd(ts.from_datetime(start_utc).tt + offsets / 86400.0)
+    # range rate > 0 when the satellite is receding.
+    doppler = -orbit.range_rate_m_s(sat_body, topos, t) / orbit.C_M_S * f_carrier
+    parts = [
+        f"{start_ts + off - anchor_ts}\t{d}\n"
+        for off, d in zip(offsets.tolist(), doppler.tolist())
+    ]
 
     compute_s = time.monotonic() - t0
 

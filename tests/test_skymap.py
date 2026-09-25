@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from auto.decoder import DecoderService
+from auto.orbit import tle_to_omm
 from auto.models import (
     Decoder,
     GroundstationConfig,
@@ -30,6 +31,14 @@ from auto.skymap import (
 )
 
 
+# Real-ish ISS elements (any valid set works for the compute_azel smoke tests).
+ISS_OMM = tle_to_omm(
+    "1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9009",
+    "2 25544  51.6400 100.0000 0001000  90.0000 270.0000 15.50000000 12349",
+    "ISS",
+)
+
+
 def _make_pass(tmp_path: Path, sample_rate: float = 250_000) -> Pass:
     sat = Satellite(
         name="TEST-SAT",
@@ -38,7 +47,7 @@ def _make_pass(tmp_path: Path, sample_rate: float = 250_000) -> Pass:
         bandwidth=40e3,
         sample_rate=sample_rate,
     )
-    # Match the test TLE's epoch (day 001 of 2024) within ephem's tolerance.
+    # Match the test elements' epoch (day 001 of 2024) within SGP4's accuracy window.
     now = datetime.datetime(2024, 1, 15, 12, 0, 0)
     pi = PassInfo(
         start_time=now,
@@ -51,9 +60,7 @@ def _make_pass(tmp_path: Path, sample_rate: float = 250_000) -> Pass:
         max_azimuth=90,
         end_azimuth=170,
         duration_minutes=4 / 60,
-        # Real-ish ISS TLE (any valid TLE works for compute_azel smoke test).
-        tle1="1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9009",
-        tle2="2 25544  51.6400 100.0000 0001000  90.0000 270.0000 15.50000000 12349",
+        omm=ISS_OMM,
     )
     pid = Pass.make_id(sat, pi)
     return Pass(
@@ -298,21 +305,19 @@ def test_compute_azel_matches_predictor():
     observer setup at a known time. Numbers don't matter; consistency does."""
     from auto.pass_predictor import compute_azel
 
-    tle1 = "1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9009"
-    tle2 = "2 25544  51.6400 100.0000 0001000  90.0000 270.0000 15.50000000 12349"
     when = datetime.datetime(2024, 1, 15, 12, 0, 0)
-    az, el = compute_azel(tle1, tle2, 52.0, 13.0, 50.0, when)
+    az, el = compute_azel(ISS_OMM, 52.0, 13.0, 50.0, when)
     assert 0 <= az < 360
     assert -90 <= el <= 90
     # Repeatable
-    az2, el2 = compute_azel(tle1, tle2, 52.0, 13.0, 50.0, when)
+    az2, el2 = compute_azel(ISS_OMM, 52.0, 13.0, 50.0, when)
     assert az == az2 and el == el2
 
 
 def test_compute_azel_treats_naive_datetime_as_local():
-    """Regression: PassInfo.start_time is naive *local* time (set via
-    ephem.localtime in PassPredictor.passes_for). Earlier compute_azel
-    fed that straight to ephem.Date which assumes UTC, shifting the
+    """Regression: PassInfo.start_time is naive *local* time (built in
+    PassPredictor.passes_for). Earlier compute_azel
+    fed that straight to the propagator which assumes UTC, shifting the
     satellite by the local UTC offset — for a LEO sat that's >1 orbit
     later and produces wildly wrong (often deeply negative) elevations.
 
@@ -322,13 +327,11 @@ def test_compute_azel_treats_naive_datetime_as_local():
     it as UTC."""
     from auto.pass_predictor import compute_azel
 
-    tle1 = "1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9009"
-    tle2 = "2 25544  51.6400 100.0000 0001000  90.0000 270.0000 15.50000000 12349"
     naive_local = datetime.datetime(2024, 1, 15, 12, 0, 0)
     aware_utc = naive_local.astimezone(datetime.timezone.utc)
 
-    az_naive, el_naive = compute_azel(tle1, tle2, 52.0, 13.0, 50.0, naive_local)
-    az_utc, el_utc = compute_azel(tle1, tle2, 52.0, 13.0, 50.0, aware_utc)
+    az_naive, el_naive = compute_azel(ISS_OMM, 52.0, 13.0, 50.0, naive_local)
+    az_utc, el_utc = compute_azel(ISS_OMM, 52.0, 13.0, 50.0, aware_utc)
     # Same physical instant → same az/el regardless of representation.
     assert abs(az_naive - az_utc) < 0.01
     assert abs(el_naive - el_utc) < 0.01

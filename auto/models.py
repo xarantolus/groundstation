@@ -4,7 +4,7 @@ import datetime
 from enum import Enum
 from typing import Any, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 IQUploadMode = Literal["never", "on_decode", "always"]
@@ -78,10 +78,21 @@ class PassInfo(BaseModel):
     max_azimuth: float
     end_azimuth: float
     duration_minutes: float
-    tle1: str
-    tle2: str
+    # CCSDS OMM field dict as served by CelesTrak (FORMAT=json).
+    omm: dict[str, Any]
     recording_start_override: Optional[datetime.datetime] = None
     recording_end_override: Optional[datetime.datetime] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_tle(cls, v: Any) -> Any:
+        # Passes persisted before the TLE→OMM switch carry tle1/tle2.
+        if isinstance(v, dict) and "omm" not in v and "tle1" in v and "tle2" in v:
+            from .orbit import tle_to_omm
+
+            v = dict(v)
+            v["omm"] = tle_to_omm(v.pop("tle1"), v.pop("tle2"))
+        return v
 
 
 class PassStatus(str, Enum):

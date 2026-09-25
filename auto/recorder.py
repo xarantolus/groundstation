@@ -345,8 +345,7 @@ class RecorderService:
             # post-processing, under a different filename so the flowgraph
             # still picks up the zero stub.
             write_doppler_file(
-                tle1=p.pass_info.tle1,
-                tle2=p.pass_info.tle2,
+                omm=p.pass_info.omm,
                 sat_name=p.satellite.name,
                 lat=self._cfg.location_lat,
                 lon=self._cfg.location_lon,
@@ -359,8 +358,7 @@ class RecorderService:
             )
             return
         write_doppler_file(
-            tle1=p.pass_info.tle1,
-            tle2=p.pass_info.tle2,
+            omm=p.pass_info.omm,
             sat_name=p.satellite.name,
             lat=self._cfg.location_lat,
             lon=self._cfg.location_lon,

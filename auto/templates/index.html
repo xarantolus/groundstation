@@ -502,13 +502,13 @@ function setPassStatus(pass_id, status){
 
 function renderAll(){ renderPasses(); renderTransfers(); renderDecoder(); renderLogs(); }
 
-/* ---------- TLE / propagation helpers (satellite.js) ---------- */
+/* ---------- OMM / propagation helpers (satellite.js) ---------- */
 
 function getSatrec(p){
   let s = satrecCache.get(p.id);
   if (s) return s;
   try {
-    s = satellite.twoline2satrec(p.pass_info.tle1, p.pass_info.tle2);
+    s = satellite.json2satrec(p.pass_info.omm);
   } catch(e){ return null; }
   if (!s) return null;
   satrecCache.set(p.id, s);

@@ -6,23 +6,20 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
 
-import ephem
+import json
+
+import numpy as np
 import requests
 
+from . import orbit
 from .models import PassInfo, Satellite
+from .orbit import Omm, compute_azel  # noqa: F401  (compute_azel re-exported)
 
 logger = logging.getLogger("groundstation.predictor")
 
-
-def _parse_tle(text: Optional[str]) -> Optional[Tuple[str, str]]:
-    """Extract the (line1, line2) pair from a TLE/3LE blob, or None if absent.
-    Tolerates a leading name line and trailing whitespace."""
-    lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
-    if len(lines) >= 3:
-        return (lines[-2], lines[-1])
-    if len(lines) == 2:
-        return (lines[0], lines[1])
-    return None
+# Coarse search starts this far in the past so a pass already in progress at
+# startup is still picked up.
+LOOKBACK = datetime.timedelta(minutes=90)
 
 
 class PassPredictor:
@@ -32,89 +29,96 @@ class PassPredictor:
         cache_dir: Optional[Union[str, Path]] = None,
     ) -> None:
         self._n2yo_api_key = n2yo_api_key
-        self._tle_cache: Dict[str, Tuple[str, str]] = {}
-        # Last-known-good TLEs persisted to disk so a celestrak outage (or a
-        # restart during one) doesn't leave us with zero TLEs — and therefore
-        # zero predicted passes and a blank map. On a network failure we fall
-        # back to the on-disk copy: the same elements last used to compute this
-        # satellite's overpasses.
+        self._omm_cache: Dict[str, Omm] = {}
+        # Last-known-good elements persisted to disk so a celestrak outage (or
+        # a restart during one) doesn't leave us with zero elements — and
+        # therefore zero predicted passes and a blank map. On a network
+        # failure we fall back to the on-disk copy: the same elements last
+        # used to compute this satellite's overpasses.
         self._cache_dir: Optional[Path] = Path(cache_dir) if cache_dir else None
 
     def _disk_path(self, norad: str) -> Optional[Path]:
         if self._cache_dir is None:
             return None
-        return self._cache_dir / f"{norad}.tle"
+        return self._cache_dir / f"{norad}.json"
 
-    def _save_tle_disk(self, norad: str, tle: Tuple[str, str]) -> None:
+    def _save_omm_disk(self, norad: str, omm: Omm) -> None:
         path = self._disk_path(norad)
         if path is None:
             return
         try:
             self._cache_dir.mkdir(parents=True, exist_ok=True)  # type: ignore[union-attr]
             tmp = path.with_name(path.name + ".tmp")
-            tmp.write_text(f"{tle[0]}\n{tle[1]}\n", encoding="utf-8")
+            tmp.write_text(json.dumps(omm), encoding="utf-8")
             tmp.replace(path)
         except OSError:
-            logger.warning("could not persist TLE for %s to disk", norad, exc_info=True)
+            logger.warning("could not persist OMM for %s to disk", norad, exc_info=True)
 
-    def _load_tle_disk(self, norad: str) -> Optional[Tuple[str, str]]:
+    def _load_omm_disk(self, norad: str) -> Optional[Omm]:
         path = self._disk_path(norad)
         if path is None:
             return None
         try:
-            tle = _parse_tle(path.read_text(encoding="utf-8"))
+            omm = orbit.parse_omm_json(path.read_text(encoding="utf-8"))
             age_h = (time.time() - path.stat().st_mtime) / 3600.0
         except OSError:
             return None
-        if tle is not None:
+        if omm is not None:
             logger.warning(
-                "using cached on-disk TLE for %s (%.1f h old) — network unavailable",
+                "using cached on-disk OMM for %s (%.1f h old) — network unavailable",
                 norad,
                 age_h,
             )
-        return tle
+        return omm
 
-    def fetch_tle(self, norad: str) -> Tuple[str, str]:
-        if norad in self._tle_cache:
-            return self._tle_cache[norad]
+    def fetch_omm(self, norad: str) -> Omm:
+        if norad in self._omm_cache:
+            return self._omm_cache[norad]
 
-        tle_text: Optional[str] = None
+        omm: Optional[Omm] = None
         try:
             r = requests.get(
-                f"https://celestrak.org/NORAD/elements/gp.php?CATNR={norad}&FORMAT=TLE",
+                f"https://celestrak.org/NORAD/elements/gp.php?CATNR={norad}&FORMAT=json",
                 timeout=10,
             )
             r.raise_for_status()
-            tle_text = r.text
+            omm = orbit.parse_omm_json(r.text)
         except requests.RequestException as e:
-            logger.error("TLE fetch from celestrak failed for %s: %s", norad, e)
+            logger.error("OMM fetch from celestrak failed for %s: %s", norad, e)
             if self._n2yo_api_key:
+                # n2yo only serves TLEs (so only 5-digit catalog numbers);
+                # convert to OMM so everything downstream sees one format.
                 try:
                     r = requests.get(
                         f"https://api.n2yo.com/rest/v1/satellite/tle/{norad}/?apiKey={self._n2yo_api_key}",
                         timeout=10,
                     )
                     r.raise_for_status()
-                    tle_text = r.json().get("tle", "")
+                    lines = [
+                        ln.strip()
+                        for ln in r.json().get("tle", "").splitlines()
+                        if ln.strip()
+                    ]
+                    if len(lines) >= 2:
+                        omm = orbit.tle_to_omm(lines[-2], lines[-1])
                 except Exception as ex:
                     logger.error("n2yo TLE fetch failed for %s: %s", norad, ex)
 
-        tle = _parse_tle(tle_text)
-        if tle is not None:
+        if omm is not None:
             # Fresh elements: cache in memory for this run and persist for later.
-            self._tle_cache[norad] = tle
-            self._save_tle_disk(norad, tle)
-            return tle
+            self._omm_cache[norad] = omm
+            self._save_omm_disk(norad, omm)
+            return omm
 
         # Network/parse failed — fall back to the last-known-good on disk.
-        # Deliberately not stored in _tle_cache so the next prediction cycle
+        # Deliberately not stored in _omm_cache so the next prediction cycle
         # retries the network and recovers once celestrak is reachable again.
-        disk = self._load_tle_disk(norad)
+        disk = self._load_omm_disk(norad)
         if disk is not None:
             return disk
 
         raise RuntimeError(
-            f"could not fetch TLE for {norad} and no cached copy on disk"
+            f"could not fetch OMM for {norad} and no cached copy on disk"
         )
 
     def passes_for(
@@ -127,85 +131,72 @@ class PassPredictor:
         pass_start_threshold_deg: float,
         hours: float,
     ) -> List[PassInfo]:
-        tle1, tle2 = self.fetch_tle(sat.norad)
+        omm = self.fetch_omm(sat.norad)
 
-        observer = ephem.Observer()
-        observer.lat = str(lat)
-        observer.lon = str(lon)
-        observer.elev = alt_m / 1000
-        observer.horizon = "0"
+        ts = orbit.timescale()
+        topos = orbit.observer(lat, lon, alt_m)
+        body = orbit.make_satellite(omm)
 
-        start_date = ephem.now() - ephem.minute * 90
-        observer.date = start_date
-        end_date = start_date + ephem.hour * hours
-        sat_body = ephem.readtle(sat.name, tle1, tle2)
+        start = datetime.datetime.now(datetime.timezone.utc) - LOOKBACK
+        t0 = ts.from_datetime(start)
+        t1 = ts.from_datetime(start + datetime.timedelta(hours=hours))
+        times, events = body.find_events(topos, t0, t1, altitude_degrees=0.0)
+
+        def sample(tt: float):
+            t = ts.tt_jd(tt)
+            el, az = orbit.altaz(body, topos, t)
+            return t, float(el[0]), float(az[0])
+
+        def crossing(a: float, b: float, upward: bool) -> Optional[float]:
+            grid = np.linspace(a, b, 100, endpoint=False)
+            el, _ = orbit.altaz(body, topos, ts.tt_jd(grid))
+            hit = np.nonzero(
+                el >= pass_start_threshold_deg
+                if upward
+                else el <= pass_start_threshold_deg
+            )[0]
+            return float(grid[hit[0]]) if hit.size else None
 
         passes: List[PassInfo] = []
-        current_date = start_date
-        while current_date < end_date:
+        # find_events yields rise(0)/culminate(1)/set(2); only complete
+        # rise→culminate→set triples are usable passes.
+        i = 0
+        while i + 2 < len(events):
+            if list(events[i : i + 3]) != [0, 1, 2]:
+                i += 1
+                continue
+            rise, culm, sett = (times[i].tt, times[i + 1].tt, times[i + 2].tt)
+            i += 3
             try:
-                observer.date = current_date
-                np = observer.next_pass(sat_body)
-                if np is None or np[0] > end_date:
-                    break
-                rise_time, rise_az, max_time, max_el, set_time, set_az = np
-                current_date = set_time + ephem.minute
-
-                if max_el * 180 / ephem.pi < threshold_deg:
+                _, max_el, max_az = sample(culm)
+                if max_el < threshold_deg:
                     continue
 
-                def crossing(a: ephem.Date, b: ephem.Date, upward: bool) -> Optional[ephem.Date]:
-                    step = (b - a) / 100
-                    for i in range(100):
-                        t = a + step * i
-                        observer.date = t
-                        sat_body.compute(observer)
-                        el_deg = float(sat_body.alt) * 180 / ephem.pi
-                        if upward and el_deg >= pass_start_threshold_deg:
-                            return t
-                        if not upward and el_deg <= pass_start_threshold_deg:
-                            return t
-                    return None
+                ascending = crossing(rise, culm, upward=True)
+                descending = crossing(culm, sett, upward=False)
+                start_tt = ascending if ascending is not None else rise
+                end_tt = descending if descending is not None else sett
 
-                ascending = crossing(rise_time, max_time, upward=True)
-                descending = crossing(max_time, set_time, upward=False)
-                start_time = ascending if ascending else rise_time
-                end_time = descending if descending else set_time
-
-                observer.date = start_time
-                sat_body.compute(observer)
-                start_el = float(sat_body.alt) * 180 / ephem.pi
-                start_az = float(sat_body.az) * 180 / ephem.pi
-
-                observer.date = max_time
-                sat_body.compute(observer)
-                max_el_deg = float(sat_body.alt) * 180 / ephem.pi
-                max_az = float(sat_body.az) * 180 / ephem.pi
-
-                observer.date = end_time
-                sat_body.compute(observer)
-                end_el = float(sat_body.alt) * 180 / ephem.pi
-                end_az = float(sat_body.az) * 180 / ephem.pi
+                st, start_el, start_az = sample(start_tt)
+                et, end_el, end_az = sample(end_tt)
 
                 passes.append(
                     PassInfo(
-                        start_time=ephem.localtime(start_time),
-                        max_time=ephem.localtime(max_time),
-                        end_time=ephem.localtime(end_time),
+                        start_time=orbit.to_local_naive(st),
+                        max_time=orbit.to_local_naive(ts.tt_jd(culm)),
+                        end_time=orbit.to_local_naive(et),
                         start_elevation=start_el,
-                        max_elevation=max_el_deg,
+                        max_elevation=max_el,
                         end_elevation=end_el,
                         start_azimuth=start_az,
                         max_azimuth=max_az,
                         end_azimuth=end_az,
-                        duration_minutes=(end_time - start_time) * 24 * 60,
-                        tle1=tle1,
-                        tle2=tle2,
+                        duration_minutes=(end_tt - start_tt) * 24 * 60,
+                        omm=omm,
                     )
                 )
             except Exception:
                 logger.exception("error calculating pass for %s", sat.name)
-                current_date += ephem.minute
 
         return passes
 
@@ -398,43 +389,6 @@ def prioritize(
         picked.extend(_slice_cluster(cluster))
         i = j
     return picked
-
-
-def compute_azel(
-    tle1: str,
-    tle2: str,
-    lat: float,
-    lon: float,
-    alt_m: float,
-    when: datetime.datetime,
-) -> Tuple[float, float]:
-    """Compute (azimuth, elevation) in degrees of the satellite described by
-    ``(tle1, tle2)`` as seen from the observer at the given time.
-
-    ``when`` may be naive (interpreted as local time, matching the
-    convention of ``PassInfo.start_time`` which is set via
-    ``ephem.localtime``) or tz-aware. ephem expects UTC, so naive
-    datetimes are converted via the system's local-time interpretation.
-    Passing a naive datetime as if it were UTC silently shifts the
-    satellite by the local UTC offset — for a LEO sat that's well over
-    one orbit and az/el ends up arbitrary."""
-    if when.tzinfo is None:
-        when = when.astimezone(datetime.timezone.utc)
-    else:
-        when = when.astimezone(datetime.timezone.utc)
-    observer = ephem.Observer()
-    observer.lat = str(lat)
-    observer.lon = str(lon)
-    observer.elev = alt_m / 1000
-    observer.horizon = "0"
-    # ephem.Date accepts a naive datetime as UTC; we just normalised to
-    # UTC above so strip the tzinfo to keep ephem happy.
-    observer.date = ephem.Date(when.replace(tzinfo=None))
-    sat_body = ephem.readtle("sat", tle1, tle2)
-    sat_body.compute(observer)
-    az = float(sat_body.az) * 180 / ephem.pi
-    el = float(sat_body.alt) * 180 / ephem.pi
-    return az, el
 
 
 def azimuth_to_compass(azimuth: float) -> str:

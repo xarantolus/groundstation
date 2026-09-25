@@ -44,8 +44,7 @@ def test_slim_pass_localizes_pass_info_times_and_trims():
             "end_time": "2026-06-27T20:04:00",
             "recording_start_override": None,
             "recording_end_override": "2026-06-27T20:03:00",
-            "tle1": "1 ...",
-            "tle2": "2 ...",
+            "omm": {"NORAD_CAT_ID": 56744},
         },
         "created_at": "2026-06-26T18:09:41",
         "decoders_pending": ["x"],
@@ -63,4 +62,4 @@ def test_slim_pass_localizes_pass_info_times_and_trims():
         assert datetime.datetime.fromisoformat(pi[k]).tzinfo is not None
     assert pi["recording_start_override"] is None
     # Non-time fields untouched.
-    assert pi["tle1"] == "1 ..."
+    assert pi["omm"] == {"NORAD_CAT_ID": 56744}

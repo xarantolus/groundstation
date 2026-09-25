@@ -7,26 +7,27 @@ import os
 import pytest
 
 from auto.doppler import write_doppler_file, write_zero_doppler_file
+from auto.orbit import tle_to_omm
 
 
 # Classic ISS TLE used in the Vallado/SGP4 reference papers — checksums are
-# valid, so ephem.readtle accepts it. The assertions only check format and
+# valid; converted to OMM for the code under test. The assertions only check format and
 # order-of-magnitude bounds, not the exact Doppler value.
 TLE1 = "1 25544U 98067A   08264.51782528 -.00002182  00000-0 -11606-4 0  2927"
 TLE2 = "2 25544  51.6416 247.4627 0006703 130.5360 325.0288 15.72125391563537"
+OMM = tle_to_omm(TLE1, TLE2, "ISS")
 
 
 def test_write_doppler_file_format(tmp_path):
     out = tmp_path / "doppler.txt"
-    # Stay near the TLE epoch (day 264 of 2008) — ephem refuses to propagate
-    # SGP4 too far from epoch.
+    # Stay near the TLE epoch (day 264 of 2008) — SGP4 is only
+    # accurate close to epoch.
     anchor = datetime.datetime(2008, 9, 20, 12, 0, 5, tzinfo=datetime.timezone.utc)
     start = anchor - datetime.timedelta(seconds=5)
     end = anchor + datetime.timedelta(seconds=5)
 
     n = write_doppler_file(
-        tle1=TLE1,
-        tle2=TLE2,
+        omm=OMM,
         sat_name="ISS",
         lat=52.0,
         lon=13.0,
@@ -67,14 +68,13 @@ def test_write_doppler_file_atomic_replace(tmp_path):
     """A failed write must not leave a partial doppler.txt in place."""
     out = tmp_path / "doppler.txt"
     out.write_text("STALE\n", encoding="utf-8")
-    # Stay near the TLE epoch (day 264 of 2008) — ephem refuses to propagate
-    # SGP4 too far from epoch.
+    # Stay near the TLE epoch (day 264 of 2008) — SGP4 is only
+    # accurate close to epoch.
     start = datetime.datetime(2008, 9, 20, 12, 0, 0, tzinfo=datetime.timezone.utc)
     end = start + datetime.timedelta(seconds=1)
 
     write_doppler_file(
-        tle1=TLE1,
-        tle2=TLE2,
+        omm=OMM,
         sat_name="ISS",
         lat=0,
         lon=0,
@@ -125,8 +125,7 @@ def test_write_doppler_file_rejects_bad_window(tmp_path):
     t = datetime.datetime(2024, 1, 1, 12, 0, 0, tzinfo=datetime.timezone.utc)
     with pytest.raises(ValueError):
         write_doppler_file(
-            tle1=TLE1,
-            tle2=TLE2,
+            omm=OMM,
             sat_name="ISS",
             lat=0,
             lon=0,

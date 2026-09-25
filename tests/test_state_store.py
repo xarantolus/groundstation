@@ -32,8 +32,7 @@ def _make_pass(tmp_path: Path, name: str = "SAT") -> Pass:
         max_azimuth=90,
         end_azimuth=180,
         duration_minutes=5.0,
-        tle1="t1",
-        tle2="t2",
+        omm={},
     )
     return Pass(
         id=Pass.make_id(sat, pi),

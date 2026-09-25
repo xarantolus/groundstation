@@ -306,8 +306,7 @@ class SkymapService:
                     snr_db, has_carrier = _row_snr(arr)
                     t = start_t + datetime.timedelta(seconds=row_idx)
                     az, el = compute_azel(
-                        p.pass_info.tle1,
-                        p.pass_info.tle2,
+                        p.pass_info.omm,
                         self._cfg.location_lat,
                         self._cfg.location_lon,
                         self._cfg.location_alt,
