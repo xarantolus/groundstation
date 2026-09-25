@@ -226,3 +226,16 @@ def test_simulation_table(capsys):
         print(f"{label:<28} {winner_label:<14}")
     captured = capsys.readouterr()
     assert "scenario" in captured.out
+
+
+def test_uncontested_high_priority_pass_is_not_trimmed_by_unaligned_overlap():
+    # Regression: slots were laid out from the cluster start in 30s steps, so
+    # the slot straddling the high-priority pass's end was scored at its
+    # midpoint (outside the pass), lost to the low-priority pass, and the
+    # high-priority pass was flagged as trimmed and clipped by USELESS_EDGE.
+    high = (_sat("HIGH", 61), _pi(0, 6.6, 11))        # ends at 6m36s, off the 30s grid
+    low = (_sat("LOW", 6), _pi(4.5, 7, 12))
+    picked = prioritize([high, low])
+    high_pi = next(pi for s, pi in picked if s.name == "HIGH")
+    assert high_pi.recording_start_override is None
+    assert high_pi.recording_end_override is None

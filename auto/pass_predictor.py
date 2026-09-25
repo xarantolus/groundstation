@@ -278,23 +278,31 @@ def _slice_cluster(
     cluster_end = max(p.end_time for _, p in cluster)
     slice_dt = datetime.timedelta(seconds=SLICE_SECONDS)
 
+    # Slots never straddle a pass boundary: a slot spanning a pass's end
+    # would be scored at its midpoint (outside that pass), so an uncontested
+    # pass would appear to lose its last few seconds and get trimmed.
+    bounds = sorted(
+        {t for _, p in cluster for t in (p.start_time, p.end_time)}
+    )
+
     # Walk the cluster window slot-by-slot, recording the winner per slot.
     slots: List[Tuple[datetime.datetime, datetime.datetime, int]] = []
-    t = cluster_start
-    while t < cluster_end:
-        slot_end = min(t + slice_dt, cluster_end)
-        mid = t + (slot_end - t) / 2
-        winner = -1
-        best = float("-inf")
-        for idx, (sat, pi) in enumerate(cluster):
-            if mid < pi.start_time or mid >= pi.end_time:
-                continue
-            s = _score_at(sat, pi, mid)
-            if s > best:
-                best = s
-                winner = idx
-        slots.append((t, slot_end, winner))
-        t = slot_end
+    for seg_start, seg_end in zip(bounds, bounds[1:]):
+        t = seg_start
+        while t < seg_end:
+            slot_end = min(t + slice_dt, seg_end)
+            mid = t + (slot_end - t) / 2
+            winner = -1
+            best = float("-inf")
+            for idx, (sat, pi) in enumerate(cluster):
+                if mid < pi.start_time or mid >= pi.end_time:
+                    continue
+                score = _score_at(sat, pi, mid)
+                if score > best:
+                    best = score
+                    winner = idx
+            slots.append((t, slot_end, winner))
+            t = slot_end
 
     # For each pass, find the longest run of contiguous winning slots.
     longest: Dict[int, Tuple[datetime.datetime, datetime.datetime]] = {}
