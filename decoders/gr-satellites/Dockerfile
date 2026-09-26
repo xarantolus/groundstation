@@ -34,6 +34,7 @@ WORKDIR /usr/local/src/gr-satellites
 RUN cmake -B build \
 	-DCMAKE_BUILD_TYPE=Release \
 	-DCMAKE_INSTALL_PREFIX=/usr \
+	-DGR_PYTHON_DIR=/usr/lib/python3/dist-packages \
 	-Wno-dev && \
 	cmake --build build -j${CMAKE_BUILD_PARALLEL_LEVEL:-$(nproc)} && \
 	DESTDIR=/tmp/install cmake --install build
@@ -54,7 +55,7 @@ RUN --mount=type=cache,target=/var/cache/apt \
 	python3 python3-pip
 
 RUN --mount=type=cache,target=/root/.cache/pip \
-	pip3 install --no-cache-dir --break-system-packages construct requests
+	pip3 install --no-cache-dir --break-system-packages construct requests websocket-client
 
 # Copy the gr-satellites out-of-tree module + Python package built above
 COPY --from=builder /tmp/install/ /
