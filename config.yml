@@ -1,6 +1,8 @@
 satellites:
   - name: SpaceTeamSat-1
-    norad: 100612
+    # 2026-203A. SatNOGS/Space-Track track STS1 as analyst object 99416 (not on
+    # CelesTrak); its elements match CelesTrak 100609 "OBJECT A" to <1 km.
+    norad: 100609
     frequency: 437.395e6
     bandwidth: 48e3
     sample_rate: 384e3
