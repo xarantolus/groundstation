@@ -1,0 +1,29 @@
+[project]
+name = "sts1-decoder"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Philipp Erhardt", email = "philipp.erhardt@tum.de" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib>=3.11.2",
+    "numba>=0.67.0",
+    "numpy>=2.4.4",
+    "reedsolo>=1.7.0",
+    "requests>=2.34.2",
+    "scipy>=1.18.1",
+    "skyfield>=1.55",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.26,<0.10.0"]
+build-backend = "uv_build"
+
+[project.scripts]
+sts1-survey = "sts1_decoder.survey:main"
+sts1-grsat = "sts1_decoder.grsat:main"
+sts1-synth = "sts1_decoder.sim:main"
+sts1-decode = "sts1_decoder.decode:main"
+sts1-retrack = "sts1_decoder.retrack:main"

@@ -1,0 +1,29 @@
+# gr-satellites satellite description for SpaceTeamSat-1 (STS1).
+# Based on the configuration validated by the STS1 team in
+# https://github.com/daniestevez/gr-satellites/discussions/783
+# (downlink moved to the IARU-coordinated 437.395 MHz). The beacon is
+# 9600 Bd; the firmware can switch to other rates, so those are listed too.
+#
+# On air: 2GFSK (Si4463, h=0.5), 1 byte 0x55 preamble, then
+# conv(r=1/2,k=7, CCSDS) over [ASM 1ACFFC1D | scrambled RS(255,223) dual basis]
+name: SPACETEAMSAT1
+alternative_names:
+  - STS1
+  - SpaceTeamSat-1
+norad: 99416
+data:
+  &tlm Telemetry:
+    unknown
+transmitters:
+  9k6 FSK CCSDS downlink:
+    frequency: 437.395e+6
+    modulation: FSK
+    baudrate: 9600
+    deviation: 2400
+    framing: CCSDS Concatenated
+    frame size: 223
+    RS basis: dual
+    RS interleave depth: 1
+    scrambler: CCSDS
+    data:
+    - *tlm
