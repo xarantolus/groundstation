@@ -157,7 +157,7 @@
   </section>
 </div>
 
-<script src="/static/satellite.min.js"></script>
+<script src="/static/satellite-6.min.js"></script>
 <script>
 const COMPASS = ["N","NE","E","SE","S","SW","W","NW"];
 const compass = az => COMPASS[Math.floor((((az+22.5)%360)+360)%360/45)];
@@ -509,7 +509,10 @@ function getSatrec(p){
   if (s) return s;
   try {
     s = satellite.json2satrec(p.pass_info.omm);
-  } catch(e){ return null; }
+  } catch(e){
+    console.error('satrec init failed for', p.id, e);
+    return null;
+  }
   if (!s) return null;
   satrecCache.set(p.id, s);
   return s;

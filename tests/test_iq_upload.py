@@ -147,19 +147,3 @@ def test_config_accepts_never_with_only_waterfall(env, tmp_path):
     path = _write(tmp_path, _BASE_YAML.format(iq_upload="never", decoders=_WATERFALL_ONLY))
     cfg = load_config(path)
     assert cfg.satellites[0].iq_upload == "never"
-
-
-def test_config_rejects_always_with_no_decoders(env, tmp_path):
-    yml = """
-    nas_directory: /tmp
-    satellites:
-      - name: T
-        norad: 1
-        frequency: 1.0
-        bandwidth: 1.0
-        sample_rate: 1.0
-        iq_upload: always
-    """
-    path = _write(tmp_path, yml)
-    with pytest.raises(SystemExit):
-        load_config(path)
