@@ -9,6 +9,7 @@
 # Processed passes are remembered in WORK_DIR/processed.txt; incomplete uploads
 # are retried on the next run. Final stdout line per pass:
 #   RESULT <pass_id> python=<n> grsat=<n> summary=<path>
+# followed by the SatNOGS check (sts1-satnogs), ending in a "SATNOGS ..." line.
 set -uo pipefail
 
 NAS_ROOT=${1:-/mnt/nas/GS}
@@ -18,7 +19,7 @@ GS_ROOT=$(cd "$PROJECT/../.." && pwd)
 STS1_NORAD=100609 # 2026-203A == SatNOGS/Space-Track 99416
 STS1_OBJECT_ID=2026-203A
 
-mkdir -p "$WORK/results"
+mkdir -p "$WORK/results" "$WORK/satnogs"
 touch "$WORK/processed.txt"
 if [ -f "$GS_ROOT/.env" ]; then set -a; . "$GS_ROOT/.env"; set +a; fi
 cd "$PROJECT"
@@ -81,4 +82,6 @@ EOF
     rm -rf "$tmp"
     echo "$id" >> "$WORK/processed.txt"
 done
+echo "=== SatNOGS"
+uv run -q sts1-satnogs --hours 48 --state "$WORK/satnogs_seen.txt" --out "$WORK/satnogs" 2>&1 | tee "$WORK/satnogs/last.log"
 echo "nightly done"

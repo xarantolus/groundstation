@@ -36,6 +36,8 @@ tools/fw_encoder/build.sh                                 # optional: flight-sof
 | `sts1-grsat REC [--baud ..] [--f-off ..]` | run **gr-satellites** (reference decoder) in podman, optional shift/decimate, parse KISS → TM frames |
 | `sts1-decode REC [--baud ..] [--f-span ..]` | Python path: FM demod + coded-ASM correlation over a grid of offsets/baud rates, soft Viterbi, RS. ~3 dB more sensitive than gr-satellites on STS1's 1-byte preamble |
 | `sts1-retrack PASS_DIR --norad N --out DIR` | redo doppler correction for a different object (residual d_new − d_old), verified against `doppler.txt` |
+| `sts1-satnogs [--hours 48]` | SatNOGS DB status/TLE (matched to CelesTrak objects) + recent Network observations; scans demod data for real STS1 frames |
+| `scripts/nightly.sh` | decode new NAS passes of today+yesterday, then run `sts1-satnogs` (state in `~/.cache/sts1-nightly`) |
 | `sts1-synth DIR` | synthetic STS1 recording, encoded with the flight software's own channel coding (`tools/fw_encoder`) |
 
 `REC` is a pass directory or a `recording.bin` (+ `--info info.json`).
