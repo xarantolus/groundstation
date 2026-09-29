@@ -14,11 +14,16 @@ satellites:
 
   - name: FramSat-1
     norad: 100610
-    frequency: 435.141e6
-    bandwidth: 48e3
-    sample_rate: 384e3
-    lo_offset: 100e3
-    priority: 60
+    # TEMPORARY (revert to 435.141e6 / 48e3 / 384e3 / lo_offset 100e3 / priority 60): centered
+    # between FramSat-1 (435.141 MHz, same orbit as STS1 -> control that we hear
+    # this orbit) and 434.5 MHz (earlier STS1 test frequency), recorded instead
+    # of STS1 while it stays silent on 437.395 MHz.
+    # lo_offset 0: both targets are +-320 kHz from center, the DC spike is harmless.
+    frequency: 434.82e6
+    bandwidth: 800e3
+    sample_rate: 1.024e6
+    lo_offset: 0
+    priority: 62
     iq_upload: always
     decoder:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
