@@ -1,0 +1,15 @@
+# FramSat-1 (Orbit NTNU), same orbit as STS1; used as a reception control.
+# IARU coordination: 435.141 MHz, 9600 bps AX.25 G3RUH FSK.
+name: FRAMSAT1
+norad: 100610
+data:
+  &tlm Telemetry:
+    unknown
+transmitters:
+  9k6 FSK downlink:
+    frequency: 435.141e+6
+    modulation: FSK
+    baudrate: 9600
+    framing: AX.25 G3RUH
+    data:
+    - *tlm

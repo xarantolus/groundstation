@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Nightly STS1 check: decode new SpaceTeamSat-1 recordings from today and yesterday.
+# Nightly STS1 check: decode new SpaceTeamSat-1 recordings from the last 3 days.
 #
 #   scripts/nightly.sh [NAS_ROOT] [WORK_DIR]
 #
@@ -21,17 +21,24 @@ STS1_OBJECT_ID=2026-203A
 
 mkdir -p "$WORK/results" "$WORK/satnogs"
 touch "$WORK/processed.txt"
+# one run at a time (a one-off run may still be busy when the daily one starts)
+exec 9> "$WORK/lock"
+if ! flock -n 9; then
+    echo "another run is in progress, waiting for it"
+    flock 9
+fi
 if [ -f "$GS_ROOT/.env" ]; then set -a; . "$GS_ROOT/.env"; set +a; fi
 cd "$PROJECT"
 
 dirs=()
-for d in "$(date +%F)" "$(date -d yesterday +%F)"; do
+# 3 days: IQ uploads over the slow NAS link can take 9+ h
+for d in "$(date +%F)" "$(date -d yesterday +%F)" "$(date -d "2 days ago" +%F)"; do
     base="$NAS_ROOT/${d:0:4}/$d"
     [ -d "$base" ] || continue
     while IFS= read -r p; do dirs+=("$p"); done < <(find "$base" -mindepth 1 -maxdepth 1 -type d -name 'SpaceTeamSat-1_*' | sort)
 done
 
-echo "found ${#dirs[@]} SpaceTeamSat-1 pass dir(s) for today+yesterday"
+echo "found ${#dirs[@]} SpaceTeamSat-1 pass dir(s) for the last 3 days"
 for pdir in "${dirs[@]}"; do
     id=$(basename "$pdir")
     if grep -qxF "$id" "$WORK/processed.txt"; then

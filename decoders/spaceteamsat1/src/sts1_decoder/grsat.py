@@ -25,8 +25,8 @@ SATYAML = HERE / "satyaml" / "SPACETEAMSAT1.yml"
 DEFAULT_IMAGE = "localhost/grsat:latest"  # built from ../gr-satellites
 
 
-def make_yaml(baud: int, dst: Path) -> Path:
-    txt = SATYAML.read_text()
+def make_yaml(baud: int, dst: Path, satyaml: Path = SATYAML) -> Path:
+    txt = satyaml.read_text()
     txt = txt.replace("baudrate: 9600", f"baudrate: {baud}").replace("deviation: 2400", f"deviation: {baud // 4}")
     txt = txt.replace("9k6 FSK CCSDS downlink", f"{baud} FSK CCSDS downlink")
     dst.write_text(txt)
@@ -66,12 +66,13 @@ def run(
     image: str = DEFAULT_IMAGE,
     extra: list[str] | None = None,
     decimate: bool = True,
+    satyaml: Path = SATYAML,
 ) -> list[bytes]:
     out_dir.mkdir(parents=True, exist_ok=True)
     tag = f"b{baud}_f{int(f_off):+d}"
     with tempfile.TemporaryDirectory(dir=out_dir) as tmp:
         tmp = Path(tmp)
-        yml = make_yaml(baud, tmp / "sts1.yml")
+        yml = make_yaml(baud, tmp / "sts1.yml", satyaml)
         if decimate or f_off:
             data = tmp / "iq.cf32"
             samp_rate = shift_decimate(rec, f_off, max(48000, 5 * baud), data)
@@ -108,11 +109,12 @@ def main(argv=None):
     ap.add_argument("--f-off", type=float, nargs="+", default=[0.0], help="Hz; signal assumed at center+f_off")
     ap.add_argument("--image", default=DEFAULT_IMAGE)
     ap.add_argument("--no-decimate", action="store_true")
+    ap.add_argument("--satyaml", type=Path, default=SATYAML, help="gr-satellites description (default: STS1)")
     a, extra = ap.parse_known_args(argv)
     rec = Recording.open(a.recording, a.info)
     for baud in a.baud:
         for f in a.f_off:
-            frames = run(rec, Path(a.out), baud, f, a.image, extra, not a.no_decimate)
+            frames = run(rec, Path(a.out), baud, f, a.image, extra, not a.no_decimate, a.satyaml)
             print(f"baud={baud} f_off={f:+.0f}: {len(frames)} frames")
             for fr in frames:
                 print("  " + describe_tm(fr))

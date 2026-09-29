@@ -36,6 +36,7 @@ def main(argv=None):
     ap.add_argument("--out", default="decode_out")
     ap.add_argument("--baud", type=int, nargs="+", default=[9600])
     ap.add_argument("--f-span", type=float, default=30e3, help="search +- this offset (Hz)")
+    ap.add_argument("--f-center", type=float, default=0.0, help="search around this offset from the recording center (Hz)")
     ap.add_argument("--f-step", type=float, default=None, help="default: baud/3")
     ap.add_argument("--chunk-s", type=float, default=20.0)
     ap.add_argument("--t0", type=float, default=0.0)
@@ -58,6 +59,9 @@ def main(argv=None):
         x = np.asarray(iq[s0 : s0 + step + ov])
         tstart = s0 / fs
         max_bw = max(a.baud) * 1.5
+        if a.f_center:
+            n = np.arange(len(x))
+            x = x * np.exp(-2j * np.pi * a.f_center / fs * n).astype(np.complex64)
         xi, fsi = to_intermediate(x, fs, a.f_span + max_bw)
         n_hits = n_ok = 0
         for baud in a.baud:
@@ -77,7 +81,7 @@ def main(argv=None):
                             {
                                 "time": r.time,
                                 "baud": baud,
-                                "f_off": float(f_off),
+                                "f_off": float(f_off + a.f_center),
                                 "corr": r.corr,
                                 "conv": conv,
                                 "decoded": r.frame is not None,
