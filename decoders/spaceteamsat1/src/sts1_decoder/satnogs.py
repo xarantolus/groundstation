@@ -9,7 +9,7 @@
 
 Observations already reported are remembered in a state file, so each run
 lists what is new. Last stdout line:
-  SATNOGS new_obs=<n> good=<n> with_signal=<n> sts1_frames=<n> norad=<id> matches=<celestrak id> reception=<status>
+  SATNOGS new_obs=<n> good=<n> with_signal=<n> sts1_frames=<n> norad=<id> matches=<celestrak id|ambiguous(a|b)> reception=<status>
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ SAT_ID = "GCRL-7329-1908-5510-3384"
 NET = "https://network.satnogs.org/api/observations/"
 DB = "https://db.satnogs.org/api"
 ASM = bytes.fromhex("1ACFFC1D")
+MATCH_MARGIN = 3.0  # nearest object must be this many times closer than the 2nd
 
 
 def get_json(url: str, **params):
@@ -145,10 +146,18 @@ def main(argv=None):
         indent=1))
     state.parent.mkdir(parents=True, exist_ok=True)
     state.write_text("\n".join(sorted(seen | {str(o["id"]) for o in obs})) + "\n")
+    # A different object only counts when the match is clear: STS1 flies close to
+    # FramSat-1, and an old SatNOGS TLE can end up between the two (2026-10-04).
+    if match and len(match) > 1 and match[0][1] * MATCH_MARGIN <= match[1][1]:
+        matches = match[0][0].split()[0]
+    elif match:
+        matches = "ambiguous(" + "|".join(m[0].split()[0] for m in match[:2]) + ")"
+    else:
+        matches = "?"
     print(f"SATNOGS new_obs={len(new)} good={len([o for o in new if o.get('status') == 'good'])} "
           f"with_signal={len([o for o in new if o.get('waterfall_status') == 'with-signal'])} "
           f"sts1_frames={len(frames)} norad={sat['norad_cat_id']} "
-          f"matches={match[0][0].split()[0] if match else '?'} reception={sat.get('reception_status')}")
+          f"matches={matches} reception={sat.get('reception_status')}")
 
 
 if __name__ == "__main__":
