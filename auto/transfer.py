@@ -39,8 +39,8 @@ class TransferService:
     """Event-driven transfer worker pool.
 
     Subscribes to TransferQueued, emits TransferStarted/Progress/Completed/Failed.
-    Persists the queue as a JSONL log (via StateStore). Uploads resume in-place
-    against partial NAS-side files — see :func:`copy_with_progress`.
+    Persists the queue as a JSONL log (via StateStore). Interrupted uploads
+    are redone from the start — see :func:`_copy_with_progress_sync`.
     """
 
     def __init__(
@@ -229,8 +229,7 @@ class TransferService:
             )
         except TransferAborted:
             # Shutting down. Leave the queue entry intact (no tombstone, no
-            # retry-with-backoff) so the upload resumes from its current
-            # offset on the next start.
+            # retry-with-backoff) so the upload is redone on the next start.
             async with self._active_lock:
                 self._active.pop(req.id, None)
             return
@@ -401,8 +400,14 @@ class TransferService:
 
 class TransferAborted(Exception):
     """Raised by ``_copy_with_progress_sync`` when ``stop_event`` was set
-    mid-copy. Partial bytes are left on disk on purpose so the next attempt
-    can resume from the offset rather than retransferring."""
+    mid-copy. The partial ``.part`` file is discarded by the next attempt,
+    which starts over from the beginning."""
+
+
+# fsync the destination this often: bounds the dirty data a freeze or power
+# cut can silently drop, surfaces write errors early, and keeps a CIFS flush
+# (triggered by any subprocess spawn closing the inherited fd) short.
+FSYNC_EVERY_BYTES = 8 * 1024 * 1024
 
 
 def _copy_with_progress_sync(
@@ -412,8 +417,15 @@ def _copy_with_progress_sync(
     stop_event: Optional[threading.Event] = None,
     buffer_size: int = 64 * 1024,
 ) -> None:
-    """Resumable byte copy. Picks up partial dst files to minimise re-transfer
-    over slow NAS links — critical if the Pi reboots mid-upload.
+    """Copy ``src`` to ``dst`` via ``dst + ".part"``, always from the start.
+
+    Interrupted uploads are not resumed: after a freeze or power cut the
+    partial file on the NAS can contain holes (writes that never left the
+    page cache), and appending to it produced corrupt-but-full-size files.
+    The ``.part`` file is fsynced periodically and at the end, its size is
+    verified, and only then is it renamed to ``dst`` — so a file at ``dst``
+    is always complete, and an existing ``dst`` of the right size means a
+    previous attempt already finished.
 
     When ``stop_event`` is set between buffer writes the copy aborts with
     :class:`TransferAborted` so the executor thread exits promptly during
@@ -423,31 +435,14 @@ def _copy_with_progress_sync(
     total = os.path.getsize(src)
     os.makedirs(os.path.dirname(dst), exist_ok=True)
 
-    start_offset = 0
-    if os.path.exists(dst):
-        existing = os.path.getsize(dst)
-        if existing == total:
-            report(total, total)
-            return
-        if existing > total:
-            raise OSError(
-                f"destination larger than source ({existing} > {total}); refusing to overwrite"
-            )
-        if existing > 0:
-            start_offset = existing
-            logger.info(
-                "resuming upload of %s from %.1f MB / %.1f MB",
-                os.path.basename(src),
-                start_offset / (1024 * 1024),
-                total / (1024 * 1024),
-            )
+    if os.path.exists(dst) and os.path.getsize(dst) == total:
+        report(total, total)
+        return
 
-    copied = start_offset
-    open_mode = "ab" if start_offset > 0 else "wb"
-    with open(src, "rb") as fsrc, open(dst, open_mode) as fdst:
-        if start_offset > 0:
-            fsrc.seek(start_offset)
-            report(copied, total)
+    part = dst + ".part"
+    copied = 0
+    since_sync = 0
+    with open(src, "rb") as fsrc, open(part, "wb") as fdst:
         while True:
             if stop_event is not None and stop_event.is_set():
                 raise TransferAborted(f"stopped at {copied}/{total} bytes")
@@ -456,7 +451,19 @@ def _copy_with_progress_sync(
                 break
             fdst.write(buf)
             copied += len(buf)
+            since_sync += len(buf)
+            if since_sync >= FSYNC_EVERY_BYTES:
+                fdst.flush()
+                os.fsync(fdst.fileno())
+                since_sync = 0
             report(copied, total)
+        fdst.flush()
+        os.fsync(fdst.fileno())
+
+    written = os.path.getsize(part)
+    if written != total:
+        raise OSError(f"upload of {src} incomplete: {written} of {total} bytes on destination")
+    os.replace(part, dst)
 
 
 class CompressionInterrupted(Exception):
