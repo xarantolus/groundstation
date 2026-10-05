@@ -71,11 +71,37 @@ class PassPredictor:
             )
         return omm
 
-    def fetch_omm(self, norad: str) -> Omm:
+    def _fetch_satnogs_omm(self, satnogs_id: str) -> Optional[Omm]:
+        """Latest TLE from the SatNOGS DB, converted to OMM, or None."""
+        try:
+            r = requests.get(
+                "https://db.satnogs.org/api/tle/",
+                params={"sat_id": satnogs_id, "format": "json"},
+                timeout=10,
+            )
+            r.raise_for_status()
+            entries = r.json()
+            if not entries:
+                logger.error("SatNOGS DB has no TLE for %s", satnogs_id)
+                return None
+            tle = entries[0]
+            return orbit.tle_to_omm(tle["tle1"], tle["tle2"], name=tle.get("tle0"))
+        except Exception as e:
+            logger.error("TLE fetch from SatNOGS DB failed for %s: %s", satnogs_id, e)
+            return None
+
+    def fetch_omm(self, norad: str, satnogs_id: Optional[str] = None) -> Omm:
         if norad in self._omm_cache:
             return self._omm_cache[norad]
 
         omm: Optional[Omm] = None
+        if satnogs_id:
+            omm = self._fetch_satnogs_omm(satnogs_id)
+            if omm is not None:
+                self._omm_cache[norad] = omm
+                self._save_omm_disk(norad, omm)
+                return omm
+            # SatNOGS unreachable: fall through to CelesTrak (by norad) and disk.
         try:
             r = requests.get(
                 f"https://celestrak.org/NORAD/elements/gp.php?CATNR={norad}&FORMAT=json",
@@ -131,7 +157,7 @@ class PassPredictor:
         pass_start_threshold_deg: float,
         hours: float,
     ) -> List[PassInfo]:
-        omm = self.fetch_omm(sat.norad)
+        omm = self.fetch_omm(sat.norad, sat.satnogs_id)
 
         ts = orbit.timescale()
         topos = orbit.observer(lat, lon, alt_m)

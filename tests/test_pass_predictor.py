@@ -107,3 +107,52 @@ def test_memory_cache_avoids_refetch_within_run(tmp_path):
         p.fetch_omm("43768")
         p.fetch_omm("43768")
         assert g.call_count == 1
+
+
+SATNOGS_TLE = [
+    {
+        "tle0": "SpaceTeamSat1",
+        "tle1": "1 99416U 26203A   26270.74132267  .00003005  00000-0  22253-3 0  9996",
+        "tle2": "2 99416  97.4200 345.1244 0057817 201.3196 158.5620 15.02536248  3293",
+        "sat_id": "GCRL-7329-1908-5510-3384",
+    }
+]
+
+
+def _json_response(payload) -> mock.Mock:
+    return mock.Mock(
+        text=json.dumps(payload), json=lambda: payload, raise_for_status=lambda: None
+    )
+
+
+def test_satnogs_tle_is_preferred_when_satnogs_id_set(tmp_path):
+    p = PassPredictor(cache_dir=tmp_path)
+    with mock.patch("requests.get", return_value=_json_response(SATNOGS_TLE)) as g:
+        omm = p.fetch_omm("100609", satnogs_id="GCRL-7329-1908-5510-3384")
+    assert omm["NORAD_CAT_ID"] == 99416
+    assert omm["OBJECT_NAME"] == "SpaceTeamSat1"
+    assert "db.satnogs.org" in g.call_args.args[0]
+    # persisted under the configured norad for the disk fallback
+    assert json.loads((tmp_path / "100609.json").read_text())["NORAD_CAT_ID"] == 99416
+
+
+def test_satnogs_failure_falls_back_to_celestrak(tmp_path):
+    p = PassPredictor(cache_dir=tmp_path)
+
+    def fake_get(url, **kw):
+        if "satnogs" in url:
+            raise requests.ConnectionError("satnogs down")
+        return _ok_response(OMM_TEXT)
+
+    with mock.patch("requests.get", side_effect=fake_get):
+        assert p.fetch_omm("43768", satnogs_id="SOME-ID") == OMM
+
+
+def test_satnogs_without_tle_falls_back_to_celestrak(tmp_path):
+    p = PassPredictor(cache_dir=tmp_path)
+
+    def fake_get(url, **kw):
+        return _json_response([]) if "satnogs" in url else _ok_response(OMM_TEXT)
+
+    with mock.patch("requests.get", side_effect=fake_get):
+        assert p.fetch_omm("43768", satnogs_id="SOME-ID") == OMM

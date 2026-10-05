@@ -61,7 +61,9 @@ for pdir in "${dirs[@]}"; do
 
     rec="$tmp"
     obj=$(python3 -c "import json;print(json.load(open('$tmp/info.json'))['pass']['omm'].get('OBJECT_ID',''))")
-    if [ "$obj" != "$STS1_OBJECT_ID" ] && [ -f "$tmp/doppler.txt" ] && [ -n "${LOCATION_LAT:-}" ]; then
+    norad=$(python3 -c "import json;print(json.load(open('$tmp/info.json'))['pass']['omm'].get('NORAD_CAT_ID',''))")
+    # Recorded with SatNOGS' STS1 elements (99416) or with 2026-203A: already right.
+    if [ "$norad" != "99416" ] && [ "$obj" != "$STS1_OBJECT_ID" ] && [ -f "$tmp/doppler.txt" ] && [ -n "${LOCATION_LAT:-}" ]; then
         echo "recorded with $obj elements -> re-tracking to $STS1_OBJECT_ID"
         if uv run -q sts1-retrack "$tmp" --norad "$STS1_NORAD" --out "$tmp/retracked" > "$out/retrack.log" 2>&1; then
             rec="$tmp/retracked"

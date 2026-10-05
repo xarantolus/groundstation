@@ -1,7 +1,9 @@
 satellites:
   - name: SpaceTeamSat-1
-    # 2026-203A. SatNOGS/Space-Track track STS1 as analyst object 99416 (not on
-    # CelesTrak); its elements match CelesTrak 100609 "OBJECT A" to <1 km.
+    # Elements from the SatNOGS DB (Space-Track analyst object 99416, not on
+    # CelesTrak): STS1 flies within km of FramSat-1 and CelesTrak's labels for
+    # 2026-203A/B are still being refitted. norad is the CelesTrak fallback.
+    satnogs_id: GCRL-7329-1908-5510-3384
     norad: 100609
     frequency: 437.395e6
     bandwidth: 48e3

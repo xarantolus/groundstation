@@ -40,6 +40,11 @@ class Satellite(BaseModel):
 
     name: str
     norad: str
+    # Optional SatNOGS DB satellite id. If set, orbital elements come from the
+    # SatNOGS DB TLE (e.g. Space-Track analyst objects not on CelesTrak, or
+    # fresh launches whose CelesTrak object labels may still swap); `norad` is
+    # then only the CelesTrak fallback.
+    satnogs_id: str | None = None
     frequency: float
     bandwidth: float
     sample_rate: float
