@@ -1,7 +1,7 @@
 # This file is essentially a copy of the Dockerfile from the SatDump repository
 # https://github.com/SatDump/SatDump/blob/master/Dockerfile
 # It is changed to clone the repo and build without GUI
-ARG DEBIAN_IMAGE_TAG=bookworm
+ARG DEBIAN_IMAGE_TAG=trixie
 FROM debian:${DEBIAN_IMAGE_TAG} AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -45,7 +45,7 @@ RUN cmake -B build \
     mkdir -p build-res && \
     cp -r build/satdump_*.deb build-res/
 
-ARG DEBIAN_IMAGE_TAG=bookworm
+ARG DEBIAN_IMAGE_TAG=trixie
 FROM debian:${DEBIAN_IMAGE_TAG} AS runner
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -61,7 +61,7 @@ RUN --mount=type=cache,target=/var/cache/apt \
     apt -y update && \
     apt -y upgrade && \
     xargs -a /usr/local/src/packages.runner apt install -qy && \
-    apt install -qy libsqlite3-0 libhdf5-cpp-103 && \
+    apt install -qy libhdf5-cpp-310 && \
     apt install -qy /usr/local/src/satdump_*.deb && \
     rm -rf /usr/local/src/satdump
 
