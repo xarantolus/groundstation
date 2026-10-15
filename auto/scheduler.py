@@ -275,6 +275,9 @@ class SchedulerService:
     async def _on_event(self, event: E.Event) -> None:
         if isinstance(event, E.RecordingStarted):
             self._gate.on_recording(True)
+        elif isinstance(event, E.RecordingFailed) and event.skipped:
+            # Nothing was recorded; another recording may still be running.
+            pass
         elif isinstance(event, (E.RecordingCompleted, E.RecordingFailed)):
             self._gate.on_recording(False)
         elif isinstance(event, E.PassEnded):

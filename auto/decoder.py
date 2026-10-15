@@ -66,6 +66,9 @@ class DecoderService:
         self._iq_consumers: List[str] = list(iq_consumers or [])
         self._queue: Deque[Tuple[str, int, int]] = collections.deque()
         self._in_queue: Set[Tuple[str, int]] = set()
+        # Item popped from the queue and not yet finished (it may still be
+        # waiting for the decode gate).
+        self._current: Optional[Tuple[str, int, int]] = None
         self._wakeup = asyncio.Event()
         self._stop = asyncio.Event()
         self._cleanup_tasks: Set[asyncio.Task] = set()
@@ -139,12 +142,15 @@ class DecoderService:
                 item = self._queue.popleft()
                 self._in_queue.discard((item[0], item[1]))
 
+                self._current = item
                 try:
                     await self._run_one(*item)
                 except asyncio.CancelledError:
                     raise
                 except Exception:
                     logger.exception("decoder run failed: %s", item)
+                finally:
+                    self._current = None
         finally:
             sub.close()
             sub_task.cancel()
@@ -165,6 +171,10 @@ class DecoderService:
         self._wakeup.set()
         if self._active_kill_event is not None and not self._active_kill_event.is_set():
             self._active_kill_event.set()
+
+    def waiting(self) -> int:
+        """Decoder runs not finished yet: queued plus the one in flight."""
+        return len(self._in_queue) + (1 if self._current is not None else 0)
 
     async def _on_event(self, event: E.Event) -> None:
         if isinstance(event, E.RecordingCompleted):

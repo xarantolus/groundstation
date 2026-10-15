@@ -439,3 +439,6 @@ nas_directory: /mnt/nas
 pass_elevation_threshold_deg: 10
 pass_start_threshold: 5
 update_interval_hours: 24
+# Always record satellites with priority >= 7 (SpaceTeamSat-1, FramSat-1,
+# ASRTU-1, Meteor); skip lower-priority passes while decoders are waiting.
+always_record_priority: 7

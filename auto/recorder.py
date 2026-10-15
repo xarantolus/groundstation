@@ -7,7 +7,7 @@ import logging
 import os
 import time
 import uuid
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 
 from . import events as E
 from .bus import EventBus, run_subscriber
@@ -41,10 +41,12 @@ class RecorderService:
         cfg: GroundstationConfig,
         bus: EventBus,
         state: StateStore,
+        decoders_waiting: Optional[Callable[[], int]] = None,
     ) -> None:
         self._cfg = cfg
         self._bus = bus
         self._state = state
+        self._decoders_waiting = decoders_waiting
         self._stop = asyncio.Event()
         self._tasks: set[asyncio.Task] = set()
         # Stop signal for the currently-running run_recorder (if any). A new
@@ -111,6 +113,12 @@ class RecorderService:
     def _handle_pass_started(self, event: E.PassStarted) -> None:
         p = event.pass_
         logger.info("recorder: PassStarted received for %s", p.id)
+        reason = self._skip_reason(p)
+        if reason is not None:
+            task = asyncio.create_task(self._skip(p, reason))
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
+            return
         prev_sdr = self._active_sdr_released
         if prev_sdr is not None and not prev_sdr.is_set():
             if self._active_stop is not None and not self._active_stop.is_set():
@@ -308,6 +316,26 @@ class RecorderService:
             )
             await self._state.transfer_put_async(req)
             await self._bus.publish(E.TransferQueued(request=req))
+
+    def _skip_reason(self, p: Pass) -> Optional[str]:
+        threshold = self._cfg.always_record_priority
+        if threshold is None or self._decoders_waiting is None:
+            return None
+        if p.satellite.priority >= threshold:
+            return None
+        waiting = self._decoders_waiting()
+        if waiting == 0:
+            return None
+        return (
+            f"skipped: priority {p.satellite.priority} < {threshold} "
+            f"and {waiting} decoder run(s) waiting"
+        )
+
+    async def _skip(self, p: Pass, reason: str) -> None:
+        p.status = PassStatus.FAILED
+        await self._state.save_pass_async(p)
+        logger.info("recorder: %s %s", p.id, reason)
+        await self._bus.publish(E.RecordingFailed(pass_id=p.id, error=reason, skipped=True))
 
     async def _fail(self, p: Pass, reason: str) -> None:
         p.status = PassStatus.FAILED

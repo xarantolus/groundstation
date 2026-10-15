@@ -194,3 +194,7 @@ class GroundstationConfig(BaseModel):
     web_port: int = 80
     n2yo_api_key: str | None = None
     skymap_retention_days: float = 14.0
+    # Passes of satellites with priority >= this are always recorded. Lower
+    # priority passes are skipped while decoders are still waiting, so the
+    # decode backlog can drain. None: record every pass.
+    always_record_priority: int | None = None

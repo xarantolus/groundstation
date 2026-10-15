@@ -69,6 +69,9 @@ class RecordingFailed(_EventBase):
     type: Literal["recording_failed"] = "recording_failed"
     pass_id: str
     error: str
+    # Pass deliberately not recorded (no recorder ran), e.g. a low-priority
+    # pass skipped so queued decoders can catch up.
+    skipped: bool = False
 
 
 class DecodeQueued(_EventBase):

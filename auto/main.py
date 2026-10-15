@@ -337,7 +337,6 @@ async def _run(cfg: GroundstationConfig, no_tui: bool) -> None:
     )
 
     scheduler = SchedulerService(cfg, bus, state, predictor, gate, passes_by_id)
-    recorder = RecorderService(cfg, bus, state)
     decoder = DecoderService(
         cfg,
         bus,
@@ -347,8 +346,11 @@ async def _run(cfg: GroundstationConfig, no_tui: bool) -> None:
         waterfalls,
         iq_consumers=sorted(registered_iq_consumers),
     )
+    recorder = RecorderService(cfg, bus, state, decoders_waiting=decoder.waiting)
     skymap = SkymapService(cfg, bus, state, passes_by_id)
-    transfer = TransferService(cfg, bus, state, gate=gate)
+    # One upload at a time: parallel uploads only fight over the SD card
+    # and Wi-Fi.
+    transfer = TransferService(cfg, bus, state, gate=gate, num_workers=1)
     web_service = WebService(cfg, bus, view, waterfalls, skymap)
 
     # Push recovered passes into view so UIs have something to show immediately

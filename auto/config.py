@@ -123,6 +123,11 @@ def load_config(path: str) -> GroundstationConfig:
             web_host=str(raw.get("web_host", "0.0.0.0")),
             web_port=int(raw.get("web_port", 80)),
             n2yo_api_key=os.getenv("N2YO_API_KEY"),
+            always_record_priority=(
+                int(raw["always_record_priority"])
+                if raw.get("always_record_priority") is not None
+                else None
+            ),
         )
     except (ValidationError, ValueError) as e:
         sys.stderr.write(f"{path}: {e}\n")
