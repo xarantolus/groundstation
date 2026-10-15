@@ -6,7 +6,9 @@ satellites:
     satnogs_id: GCRL-7329-1908-5510-3384
     norad: 100609
     frequency: 437.395e6
-    bandwidth: 48e3
+    # Wide passband (file size is set by sample_rate) to catch a transmitter
+    # off its nominal frequency; stays clear of the DC spike at -lo_offset.
+    bandwidth: 150e3
     sample_rate: 384e3
     lo_offset: 100e3
     priority: 61
@@ -342,22 +344,6 @@ satellites:
     iq_upload: on_decode
 
   # Image-producing satellites (SatDump pipelines)
-  - name: StratoSat-TK1
-    norad: 57167
-    frequency: 435.870e6
-    bandwidth: 128e3
-    gain: 40
-    sample_rate: 384e3
-    lo_offset: 100e3
-    priority: 2
-    decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
-      - name: geoscan
-        container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
-        min_size_bytes: 1
-        env:
-          PIPELINE_NAME: stratosat_tk1_uhf
-
   - name: RTU-MIREA1
     norad: 61785
     frequency: 436.200e6
@@ -374,22 +360,6 @@ satellites:
         env:
           PIPELINE_NAME: rtumirea1_uhf
     gain: 30
-
-  - name: TUSUR-GO
-    norad: 61782
-    frequency: 437.730e6
-    bandwidth: 128e3
-    gain: 40
-    sample_rate: 384e3
-    lo_offset: 100e3
-    priority: 2
-    decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
-      - name: geoscan
-        container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
-        min_size_bytes: 1
-        env:
-          PIPELINE_NAME: tusur_go_uhf
 
   - name: VIZARD-ION
     norad: 61749

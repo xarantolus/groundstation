@@ -288,6 +288,9 @@ async def run_recorder(
         "--name", container_name,
         *COMMON_FLAGS,
         *(["--userns=keep-id"] if not _is_root() else []),
+        # Lets GNU Radio enable real-time scheduling, so decoders/uploads
+        # can't starve the USB reader (overflows = dropped samples).
+        "--cap-add=SYS_NICE",
         *sum([["-e", e] for e in envs], []),
         "--device",
         "/dev/bus/usb:/dev/bus/usb",
