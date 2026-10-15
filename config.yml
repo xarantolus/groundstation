@@ -11,6 +11,7 @@ satellites:
     bandwidth: 150e3
     sample_rate: 384e3
     lo_offset: 100e3
+    gain: 30
     priority: 61
     iq_upload: always
     decoder:
@@ -22,6 +23,7 @@ satellites:
     bandwidth: 48e3
     sample_rate: 384e3
     lo_offset: 100e3
+    gain: 30
     priority: 60
     iq_upload: never
     decoder:
@@ -34,6 +36,7 @@ satellites:
     bandwidth: 24e3
     sample_rate: 96e3
     lo_offset: 20e3
+    gain: 30
     priority: 15
     iq_upload: never
     decoder:
@@ -50,6 +53,7 @@ satellites:
     bandwidth: 150e3
     sample_rate: 384e3
     lo_offset: 100e3
+    gain: 30
     priority: 7
     decoder:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
@@ -81,6 +85,7 @@ satellites:
     bandwidth: 150e3
     sample_rate: 384e3
     lo_offset: 100e3
+    gain: 30
     priority: 7
     decoder:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
@@ -412,6 +417,7 @@ satellites:
     bandwidth: 128e3
     sample_rate: 384e3
     lo_offset: 100e3
+    gain: 30
     priority: 2
     iq_upload: never
     decoder:
@@ -429,6 +435,7 @@ satellites:
     bandwidth: 128e3
     sample_rate: 384e3
     lo_offset: 100e3
+    gain: 30
     priority: 2
     iq_upload: never
     decoder:
