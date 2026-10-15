@@ -20,7 +20,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY csp_helpers.py decode.py deframe.py /app/
 
 COPY ax100_decoder.grc /tmp/ax100_decoder.grc
-RUN grcc ax100_decoder.grc && \
+RUN cd /tmp && \
+	grcc ax100_decoder.grc && \
 	mv ax100_decoder.py /usr/local/bin/ax100_decoder.py && \
 	chmod +x /usr/local/bin/ax100_decoder.py
 

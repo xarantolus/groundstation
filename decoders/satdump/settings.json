@@ -1,5 +1,7 @@
 {
     "satdump_general": {
-        "kepler_update_interval": "Never"
+        "kepler_update_interval": {
+            "value": "Never"
+        }
     }
 }
