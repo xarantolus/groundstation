@@ -23,7 +23,7 @@ satellites:
     sample_rate: 384e3
     lo_offset: 100e3
     priority: 60
-    iq_upload: always
+    iq_upload: never
     decoder:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
 
@@ -35,7 +35,7 @@ satellites:
     sample_rate: 96e3
     lo_offset: 20e3
     priority: 15
-    iq_upload: always
+    iq_upload: never
     decoder:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: lrpt
@@ -122,7 +122,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-    iq_upload: on_decode
+    iq_upload: never
 
 
   - name: CATSAT
@@ -133,6 +133,7 @@ satellites:
     sample_rate: 384e3
     lo_offset: 100e3
     priority: 6
+    iq_upload: never
     decoder:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: ax100
@@ -155,7 +156,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-    iq_upload: on_decode
+    iq_upload: never
 
 
   - name: K-HERO
@@ -173,7 +174,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-    iq_upload: on_decode
+    iq_upload: never
 
   - name: Luojia-1
     norad: 43485
@@ -190,7 +191,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-    iq_upload: always
+    iq_upload: never
 
   - name: MIMAN
     norad: 52900
@@ -207,7 +208,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-    iq_upload: on_decode
+    iq_upload: never
 
   - name: NUSHSAT-1
     norad: 63211
@@ -224,7 +225,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-    iq_upload: on_decode
+    iq_upload: never
 
   - name: SNIPE-1
     norad: 56749
@@ -242,7 +243,7 @@ satellites:
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
 
-    iq_upload: on_decode
+    iq_upload: never
   - name: SNIPE-2
     norad: 56745
     frequency: 436.000e6
@@ -259,7 +260,7 @@ satellites:
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
 
-    iq_upload: on_decode
+    iq_upload: never
   - name: SNIPE-4
     norad: 56744
     frequency: 437.800e6
@@ -276,7 +277,7 @@ satellites:
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
 
-    iq_upload: on_decode
+    iq_upload: never
   - name: Suomi 100
     norad: 43804
     frequency: 437.775e6
@@ -292,7 +293,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-    iq_upload: on_decode
+    iq_upload: never
   - name: UND ROADS 1
     norad: 64535
     frequency: 435.400e6
@@ -309,7 +310,7 @@ satellites:
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
 
-    iq_upload: on_decode
+    iq_upload: never
   - name: UND ROADS 2
     norad: 64549
     frequency: 435.400e6
@@ -325,7 +326,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-    iq_upload: on_decode
+    iq_upload: never
   - name: BEE-1000
     norad: 66650
     frequency: 436.500e6
@@ -341,7 +342,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-    iq_upload: on_decode
+    iq_upload: never
 
   # Image-producing satellites (SatDump pipelines)
   - name: RTU-MIREA1
@@ -352,6 +353,7 @@ satellites:
     sample_rate: 384e3
     lo_offset: 100e3
     priority: 2
+    iq_upload: never
     decoder:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: geoscan
@@ -372,6 +374,7 @@ satellites:
     sample_rate: 384e3
     lo_offset: 100e3
     priority: 2
+    iq_upload: never
     decoder:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: geoscan
@@ -391,6 +394,7 @@ satellites:
     sample_rate: 384e3
     lo_offset: 100e3
     priority: 2
+    iq_upload: never
     decoder:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: geoscan
@@ -409,6 +413,7 @@ satellites:
     sample_rate: 384e3
     lo_offset: 100e3
     priority: 2
+    iq_upload: never
     decoder:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: sstv_robot36
@@ -425,6 +430,7 @@ satellites:
     sample_rate: 384e3
     lo_offset: 100e3
     priority: 2
+    iq_upload: never
     decoder:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: sstv_robot36
