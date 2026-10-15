@@ -357,6 +357,9 @@ satellites:
       - name: geoscan
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
         min_size_bytes: 1
+        # The recording is already doppler-corrected; SatDump's own correction
+        # also needs TLEs, which its settings deliberately never download.
+        args: --enable_doppler=false
         env:
           PIPELINE_NAME: rtumirea1_uhf
     gain: 30
@@ -374,6 +377,9 @@ satellites:
       - name: geoscan
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
         min_size_bytes: 1
+        # The recording is already doppler-corrected; SatDump's own correction
+        # also needs TLEs, which its settings deliberately never download.
+        args: --enable_doppler=false
         env:
           PIPELINE_NAME: vizard_ion_uhf
 
@@ -390,6 +396,9 @@ satellites:
       - name: geoscan
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
         min_size_bytes: 1
+        # The recording is already doppler-corrected; SatDump's own correction
+        # also needs TLEs, which its settings deliberately never download.
+        args: --enable_doppler=false
         env:
           PIPELINE_NAME: colibri_s_uhf
 
@@ -404,7 +413,7 @@ satellites:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: sstv_robot36
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
-        args: --sstv_mode=Robot36 --satellite_norad=67290 --satellite_frequency=437.350e6 --enable_doppler=true --bandwidth=12500
+        args: --sstv_mode=Robot36 --satellite_norad=67290 --satellite_frequency=437.350e6 --enable_doppler=false --bandwidth=12500
         min_size_bytes: 1
         env:
           PIPELINE_NAME: sstv_decoder
@@ -420,7 +429,7 @@ satellites:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: sstv_robot36
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
-        args: --sstv_mode=Robot36 --satellite_norad=67284 --satellite_frequency=436.320e6 --enable_doppler=true --bandwidth=12500
+        args: --sstv_mode=Robot36 --satellite_norad=67284 --satellite_frequency=436.320e6 --enable_doppler=false --bandwidth=12500
         min_size_bytes: 1
         env:
           PIPELINE_NAME: sstv_decoder
