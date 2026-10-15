@@ -61,15 +61,25 @@ build_image() {
     --build-arg TAG="$IMAGE_TAG" \
     --build-arg GITHUB_REPOSITORY="$REPO_NAME" \
     "${cache_args[@]}" \
-    -f "$dockerfile" .
+    -f "$dockerfile" . || return 1
 
-  [ "$PUSH_MODE" = true ] && $CONTAINER_TOOL push "$image"
+  if [ "$PUSH_MODE" = true ]; then
+    $CONTAINER_TOOL push "$image" || return 1
+  fi
 }
 
-build_image gs Dockerfile newer
-build_image satellite-recorder Dockerfile.recorder never
+# Keep building the remaining images when one fails, but exit non-zero at the
+# end: otherwise CI stays green while the registry keeps serving stale images.
+failed=()
+build_image gs Dockerfile newer || failed+=(gs)
+build_image satellite-recorder Dockerfile.recorder never || failed+=(satellite-recorder)
 
-(cd decoders/ax100 && build_image ax100-decoder Dockerfile never)
-(cd decoders/waterfall && build_image waterfall Dockerfile missing)
-(cd decoders/satdump && build_image satdump-decoder Dockerfile missing)
-(cd decoders/gr-satellites && build_image gr-satellites Dockerfile missing)
+(cd decoders/ax100 && build_image ax100-decoder Dockerfile never) || failed+=(ax100-decoder)
+(cd decoders/waterfall && build_image waterfall Dockerfile missing) || failed+=(waterfall)
+(cd decoders/satdump && build_image satdump-decoder Dockerfile missing) || failed+=(satdump-decoder)
+(cd decoders/gr-satellites && build_image gr-satellites Dockerfile missing) || failed+=(gr-satellites)
+
+if [ ${#failed[@]} -gt 0 ]; then
+  echo "Failed to build: ${failed[*]}" >&2
+  exit 1
+fi

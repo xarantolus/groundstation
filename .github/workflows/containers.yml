@@ -90,7 +90,7 @@ jobs:
         run: |
           set -euo pipefail
           repo_lc="$(echo "${{ env.GITHUB_REPOSITORY }}" | tr '[:upper:]' '[:lower:]')"
-          for image in gs satellite-recorder ax100-decoder waterfall satdump-decoder; do
+          for image in gs satellite-recorder ax100-decoder waterfall satdump-decoder gr-satellites; do
             full="${{ env.REGISTRY }}/$repo_lc/$image"
             podman manifest create "$full:$TAG"
             podman manifest add "$full:$TAG" "docker://$full:$TAG-amd64"
