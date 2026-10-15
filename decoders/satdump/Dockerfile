@@ -51,19 +51,17 @@ FROM debian:${DEBIAN_IMAGE_TAG} AS runner
 ARG DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
 
-COPY --from=builder /usr/local/src/satdump/packages.runner /usr/local/src/
-
-COPY --from=builder /usr/local/src/satdump/build-res/satdump_*.deb /usr/local/src/
-
-# Cache apt package downloads for runner dependencies
+# The .deb and package list are bind-mounted from the builder instead of
+# COPYed, so they don't end up in a layer. No recommends: they pull in ~1 GB
+# (WebKitGTK, GStreamer, LLVM, GDAL, ...) that the CLI pipelines don't use.
 RUN --mount=type=cache,target=/var/cache/apt \
     --mount=type=cache,target=/var/lib/apt \
+    --mount=type=bind,from=builder,source=/usr/local/src/satdump,target=/mnt/satdump \
     apt -y update && \
     apt -y upgrade && \
-    xargs -a /usr/local/src/packages.runner apt install -qy && \
-    apt install -qy libhdf5-cpp-310 && \
-    apt install -qy /usr/local/src/satdump_*.deb && \
-    rm -rf /usr/local/src/satdump
+    xargs -a /mnt/satdump/packages.runner apt install --no-install-recommends -qy && \
+    apt install --no-install-recommends -qy libhdf5-cpp-310 libhdf5-hl-310 && \
+    apt install --no-install-recommends -qy /mnt/satdump/build-res/satdump_*.deb
 
 COPY satdump.sh /usr/bin/satdump.sh
 RUN chmod +x /usr/bin/satdump.sh

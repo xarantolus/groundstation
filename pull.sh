@@ -32,6 +32,6 @@ case "$ARCH" in
 esac
 PLATFORM="${PLATFORM:-${OS}/${ARCH}}"
 
-for name in gs satellite-recorder ax100-decoder waterfall satdump-decoder; do
+for name in gs satellite-recorder ax100-decoder waterfall satdump-decoder gr-satellites; do
   $CONTAINER_TOOL pull --platform "$PLATFORM" "$IMAGE_PATH_PREFIX/$name:$IMAGE_TAG"
 done
