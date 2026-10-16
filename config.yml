@@ -222,7 +222,9 @@ satellites:
     gain: 30
     sample_rate: 384e3
     lo_offset: 100e3
-    priority: 6
+    # Temporary: always record and keep the IQ to find out why its
+    # centre-frequency bursts don't decode (AX.100 Mode 5, 1k2/2k4).
+    priority: 7
     decoder:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: ax100
@@ -230,7 +232,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-    iq_upload: never
+    iq_upload: always
 
   - name: SNIPE-1
     norad: 56749
