@@ -133,12 +133,13 @@ satellites:
   - name: CATSAT
     norad: 60246
     frequency: 437.185e6
-    bandwidth: 128e3
+    bandwidth: 80e3
     gain: 30
-    sample_rate: 384e3
+    sample_rate: 96e3
     lo_offset: 100e3
-    priority: 6
-    iq_upload: never
+    # Temporary AX100 Mode 5 debugging: always record, keep IQ at 96 kS/s.
+    priority: 7
+    iq_upload: always
     decoder:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: ax100
@@ -218,12 +219,11 @@ satellites:
   - name: NUSHSAT-1
     norad: 63211
     frequency: 436.200e6
-    bandwidth: 128e3
+    bandwidth: 80e3
     gain: 30
-    sample_rate: 384e3
+    sample_rate: 96e3
     lo_offset: 100e3
-    # Temporary: always record and keep the IQ to find out why its
-    # centre-frequency bursts don't decode (AX.100 Mode 5, 1k2/2k4).
+    # Temporary AX100 Mode 5 debugging: always record, keep IQ at 96 kS/s.
     priority: 7
     decoder:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
@@ -288,11 +288,12 @@ satellites:
   - name: Suomi 100
     norad: 43804
     frequency: 437.775e6
-    bandwidth: 128e3
+    bandwidth: 80e3
     gain: 30
-    sample_rate: 384e3
+    sample_rate: 96e3
     lo_offset: 100e3
-    priority: 6
+    # Temporary AX100 Mode 5 debugging: always record, keep IQ at 96 kS/s.
+    priority: 7
     decoder:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: ax100
@@ -300,15 +301,16 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-    iq_upload: never
+    iq_upload: always
   - name: UND ROADS 1
     norad: 64535
     frequency: 435.400e6
-    bandwidth: 128e3
+    bandwidth: 80e3
     gain: 30
-    sample_rate: 384e3
+    sample_rate: 96e3
     lo_offset: 100e3
-    priority: 6
+    # Temporary AX100 Mode 5 debugging: always record, keep IQ at 96 kS/s.
+    priority: 7
     decoder:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: ax100
@@ -317,15 +319,16 @@ satellites:
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
 
-    iq_upload: never
+    iq_upload: always
   - name: UND ROADS 2
     norad: 64549
     frequency: 435.400e6
-    bandwidth: 128e3
+    bandwidth: 80e3
     gain: 30
-    sample_rate: 384e3
+    sample_rate: 96e3
     lo_offset: 100e3
-    priority: 6
+    # Temporary AX100 Mode 5 debugging: always record, keep IQ at 96 kS/s.
+    priority: 7
     decoder:
       - container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: ax100
@@ -333,7 +336,7 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
-    iq_upload: never
+    iq_upload: always
   - name: BEE-1000
     norad: 66650
     frequency: 436.500e6
