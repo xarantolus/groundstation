@@ -50,7 +50,9 @@ satellites:
   - name: Meteor M2-3
     norad: 57166
     frequency: 137.900e6
-    bandwidth: 150e3
+    # Recorder filter is flat to ~0.4*bandwidth: 180 kHz keeps the 80k LRPT
+    # mode (+-64 kHz) unattenuated and the DC spike at -lo_offset outside.
+    bandwidth: 180e3
     sample_rate: 384e3
     lo_offset: 100e3
     gain: 30
@@ -82,7 +84,9 @@ satellites:
   - name: Meteor M2-4
     norad: 59051
     frequency: 137.900e6
-    bandwidth: 150e3
+    # Recorder filter is flat to ~0.4*bandwidth: 180 kHz keeps the 80k LRPT
+    # mode (+-64 kHz) unattenuated and the DC spike at -lo_offset outside.
+    bandwidth: 180e3
     sample_rate: 384e3
     lo_offset: 100e3
     gain: 30
