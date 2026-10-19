@@ -19,6 +19,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "pyflakes>=3.2",
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
 ]
