@@ -6,6 +6,7 @@ import datetime
 import json
 import logging
 import os
+import shutil
 import signal
 import sys
 import uuid
@@ -29,7 +30,7 @@ from .state import StateStore
 from .transfer import TransferService
 from .tui import TUIService
 from .view import ViewModel
-from .waterfall_store import WaterfallStore
+from .artifact_store import ArtifactStore
 from .web import WebService
 
 from typing import Optional
@@ -80,7 +81,7 @@ def _recover_interrupted_pass(
     """Handle a pass that was RECORDING when the groundstation died.
     Marks it RECORDED_PARTIAL, annotates info.json, and (optionally) returns
     a TransferRequest for the partial IQ. Does NOT enqueue decoders."""
-    p.status = PassStatus.RECORDED_PARTIAL
+    p.set_status(PassStatus.RECORDED_PARTIAL, "groundstation restarted during recording")
     p.interrupted = True
     state.save_pass(p)
 
@@ -192,7 +193,7 @@ def _boot_recovery(
                         p.status.value,
                         len(p.satellite.decoder),
                     )
-                    p.status = PassStatus.DECODED
+                    p.set_status(PassStatus.DECODED)
                     state.save_pass(p)
                     _bump("advanced_to_decoded")
 
@@ -278,7 +279,9 @@ async def _run(cfg: GroundstationConfig, no_tui: bool) -> None:
     _attach_bus_logging(bus, loop)
 
     state = StateStore("state")
-    waterfalls = WaterfallStore("state")
+    artifacts = ArtifactStore("state")
+    # Superseded by state/artifacts (ArtifactStore).
+    shutil.rmtree("state/waterfalls", ignore_errors=True)
     view = ViewModel()
 
     passes_by_id, extra_transfers = _boot_recovery(cfg, state)
@@ -351,7 +354,7 @@ async def _run(cfg: GroundstationConfig, no_tui: bool) -> None:
     # One upload at a time: parallel uploads only fight over the SD card
     # and Wi-Fi.
     transfer = TransferService(cfg, bus, state, gate=gate, num_workers=1)
-    web_service = WebService(cfg, bus, view, waterfalls, skymap)
+    web_service = WebService(cfg, bus, view, artifacts, skymap)
 
     # Push recovered passes into view so UIs have something to show immediately
     if passes_by_id:

@@ -8,7 +8,6 @@ import pytest
 
 from auto import events as E
 from auto.bus import EventBus
-from auto.decode_gate import DecodeGate
 from auto.models import (
     Decoder,
     GroundstationConfig,
@@ -18,7 +17,6 @@ from auto.models import (
     Satellite,
 )
 from auto.recorder import RecorderService
-from auto.scheduler import SchedulerService
 from auto.state import StateStore
 
 
@@ -94,9 +92,9 @@ def test_skip_reason(tmp_path: Path, threshold, priority, waiting, skip):
 
 
 @pytest.mark.asyncio
-async def test_skipped_pass_leaves_running_recording_alone(tmp_path: Path):
+async def test_skipped_pass_is_skipped_not_failed_and_leaves_recording_alone(tmp_path: Path):
     rec = _recorder(tmp_path, 7, waiting=3)
-    sub = rec._bus.subscribe(E.RecordingFailed)
+    sub = rec._bus.subscribe(E.PassStatusChanged, E.RecordingFailed, E.RecordingStarted)
     # Pretend another pass is currently recording.
     running_stop = asyncio.Event()
     running_sdr = asyncio.Event()
@@ -107,25 +105,12 @@ async def test_skipped_pass_leaves_running_recording_alone(tmp_path: Path):
     rec._handle_pass_started(E.PassStarted(pass_=p))
     event = await asyncio.wait_for(sub.get(), timeout=2)
 
-    assert isinstance(event, E.RecordingFailed)
-    assert event.skipped and event.pass_id == p.id
-    assert p.status == PassStatus.FAILED
+    assert isinstance(event, E.PassStatusChanged)
+    assert event.pass_id == p.id and event.status == PassStatus.SKIPPED
+    assert "3 decoder run(s) waiting" in (event.reason or "")
+    assert p.status == PassStatus.SKIPPED and p.status_reason == event.reason
+    # No recording events: the SDR (and the decode gate) are untouched.
+    await asyncio.sleep(0.05)
+    assert sub._sub.queue.empty()
     assert not running_stop.is_set(), "skip must not stop the running recording"
     assert rec._active_sdr_released is running_sdr
-
-
-@pytest.mark.asyncio
-async def test_skip_does_not_open_gate_during_recording(tmp_path: Path):
-    cfg = _cfg(tmp_path, 7)
-    gate = DecodeGate(safety_minutes=1.0)
-    gate.mark_ready()
-    sched = SchedulerService(
-        cfg, EventBus(), StateStore(str(tmp_path / "state")), None, gate, {}
-    )
-
-    await sched._on_event(E.RecordingStarted(pass_id="a"))
-    assert not gate.is_open()
-    await sched._on_event(E.RecordingFailed(pass_id="b", error="skipped", skipped=True))
-    assert not gate.is_open(), "skipped pass reopened the gate mid-recording"
-    await sched._on_event(E.RecordingCompleted(pass_id="a", path="/x"))
-    assert gate.is_open()

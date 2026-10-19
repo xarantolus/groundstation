@@ -153,6 +153,8 @@ def event_types() -> Iterable[Type[Event]]:
         _e.PassUpcoming,
         _e.PassStarted,
         _e.PassEnded,
+        _e.PassStatusChanged,
+        _e.PassImagesChanged,
         _e.RecordingStarted,
         _e.RecordingLog,
         _e.RecordingCompleted,

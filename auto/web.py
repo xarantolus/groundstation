@@ -16,7 +16,7 @@ from .bus import EventBus, run_subscriber
 from .models import GroundstationConfig
 from .skymap import SkymapService
 from .view import ViewModel
-from .waterfall_store import WaterfallStore
+from .artifact_store import ArtifactStore
 
 logger = logging.getLogger("groundstation.web")
 
@@ -95,13 +95,13 @@ class WebService:
         cfg: GroundstationConfig,
         bus: EventBus,
         view: ViewModel,
-        waterfalls: WaterfallStore,
+        artifacts: ArtifactStore,
         skymap: SkymapService,
     ) -> None:
         self._cfg = cfg
         self._bus = bus
         self._view = view
-        self._waterfalls = waterfalls
+        self._artifacts = artifacts
         self._skymap = skymap
         self._sockets: List[web.WebSocketResponse] = []
         self._stop = asyncio.Event()
@@ -109,7 +109,7 @@ class WebService:
         self._app.router.add_get("/", self._index)
         self._app.router.add_get("/ws", self._ws)
         self._app.router.add_get("/static/{name}", self._static)
-        self._app.router.add_get("/waterfalls/{pass_id}.png", self._waterfall)
+        self._app.router.add_get("/artifacts/{pass_id}/{path:.+}", self._artifact)
         self._app.router.add_get("/skymap", self._skymap_page)
         self._app.router.add_get("/api/skymap", self._api_skymap)
         self._app.router.add_get("/api/skymap/tracks", self._api_skymap_tracks)
@@ -133,6 +133,8 @@ class WebService:
             E.PassUpcoming,
             E.PassStarted,
             E.PassEnded,
+            E.PassStatusChanged,
+            E.PassImagesChanged,
             E.RecordingStarted,
             E.RecordingCompleted,
             E.RecordingFailed,
@@ -187,37 +189,33 @@ class WebService:
                         ids.append(pid)
         return ids
 
-    async def _waterfall_map(self, pass_ids: List[str]) -> Dict[str, bool]:
+    async def _images_map(self, pass_ids: List[str]) -> Dict[str, List[str]]:
         if not pass_ids:
             return {}
-        unique = list(set(pass_ids))
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, self._waterfalls.has_many, unique
-        )
+        return await loop.run_in_executor(None, self._artifacts.images_many, pass_ids)
 
-    def _apply_waterfall_map(
-        self, payload: Dict[str, Any], has_map: Dict[str, bool]
+    def _apply_images_map(
+        self, payload: Dict[str, Any], images: Dict[str, List[str]]
     ) -> None:
+        """Attach each pass's kept images (paths under /artifacts/<id>/)."""
         p = payload.get("pass")
         if isinstance(p, dict):
-            pid = p.get("id")
-            p["has_waterfall"] = bool(pid) and has_map.get(pid, False)
+            p["images"] = images.get(p.get("id") or "", [])
             _slim_pass_for_wire(p)
         passes = payload.get("passes")
         if isinstance(passes, list):
             for entry in passes:
                 if isinstance(entry, dict):
-                    pid = entry.get("id")
-                    entry["has_waterfall"] = bool(pid) and has_map.get(pid, False)
+                    entry["images"] = images.get(entry.get("id") or "", [])
                     _slim_pass_for_wire(entry)
 
     async def _broadcast_event(self, event: E.Event) -> None:
         if not self._sockets:
             return
         event_dict = event.model_dump(mode="json", by_alias=True)
-        has_map = await self._waterfall_map(self._collect_pass_ids(event_dict))
-        self._apply_waterfall_map(event_dict, has_map)
+        images = await self._images_map(self._collect_pass_ids(event_dict))
+        self._apply_images_map(event_dict, images)
         payload = {"kind": "event", "event": event_dict}
         message = json.dumps(payload, default=str)
         stale: List[web.WebSocketResponse] = []
@@ -251,13 +249,13 @@ class WebService:
             raise web.HTTPNotFound()
         return web.FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
 
-    async def _waterfall(self, request: web.Request) -> web.StreamResponse:
+    async def _artifact(self, request: web.Request) -> web.StreamResponse:
         pass_id = request.match_info["pass_id"]
         if not _SAFE_NAME.match(pass_id):
             raise web.HTTPNotFound()
         loop = asyncio.get_running_loop()
         path = await loop.run_in_executor(
-            None, self._waterfalls.path_for, pass_id
+            None, self._artifacts.path_for, pass_id, request.match_info["path"]
         )
         if path is None:
             raise web.HTTPNotFound()
@@ -294,8 +292,8 @@ class WebService:
         await ws.prepare(request)
         self._sockets.append(ws)
         snap = self._view.snapshot().model_dump(mode="json")
-        has_map = await self._waterfall_map(self._collect_pass_ids(snap))
-        self._apply_waterfall_map(snap, has_map)
+        images = await self._images_map(self._collect_pass_ids(snap))
+        self._apply_images_map(snap, images)
         snap["station"] = {
             "lat": self._cfg.location_lat,
             "lon": self._cfg.location_lon,

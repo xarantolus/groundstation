@@ -10,7 +10,7 @@ import datetime as _dt
 
 
 def _waterfall() -> Decoder:
-    return Decoder(container="waterfall:latest")
+    return Decoder(name="waterfall", role="waterfall", container="waterfall:latest")
 
 
 def _real(name: str = "ax100") -> Decoder:
@@ -112,7 +112,9 @@ satellites:
 {decoders}
 """
 
-_WATERFALL_ONLY = "      - container: waterfall:latest\n"
+_WATERFALL_ONLY = (
+    "      - name: waterfall\n        role: waterfall\n        container: waterfall:latest\n"
+)
 _REAL_ONLY = "      - name: ax100\n        container: ax100:latest\n"
 _BOTH = _WATERFALL_ONLY + _REAL_ONLY
 _NONE = "      []\n"  # represented via plain empty list trick
@@ -147,3 +149,19 @@ def test_config_accepts_never_with_only_waterfall(env, tmp_path):
     path = _write(tmp_path, _BASE_YAML.format(iq_upload="never", decoders=_WATERFALL_ONLY))
     cfg = load_config(path)
     assert cfg.satellites[0].iq_upload == "never"
+
+
+def test_config_rejects_nameless_decoder(env, tmp_path):
+    path = _write(
+        tmp_path,
+        _BASE_YAML.format(iq_upload="never", decoders="      - container: waterfall:latest\n"),
+    )
+    with pytest.raises(SystemExit):
+        load_config(path)
+
+
+def test_persisted_nameless_decoder_migrates_to_waterfall_role():
+    # Passes saved before decoder roles existed marked waterfalls by omitting name.
+    d = Decoder.model_validate({"container": "waterfall:latest"})
+    assert d.name == "waterfall" and d.role == "waterfall"
+    assert not d.policy.produces_data and not d.policy.counts_toward_backlog

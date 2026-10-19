@@ -18,10 +18,11 @@ from .models import (
     TransferRequest,
     should_upload_iq,
 )
+from .artifact_store import ArtifactStore
+from .lifecycle import set_pass_status
 from .podman import DECODER_KILLED_BY_STOP, DEFAULT_DECODER_TIMEOUT_MINUTES, filter_decoder_outputs, run_decoder
 from .state import StateStore
 from .transfer import CompressionInterrupted, compress_file
-from .waterfall_store import WATERFALL_FILENAME, WaterfallStore
 
 logger = logging.getLogger("groundstation.decoder")
 _decoder_output_logger = logging.getLogger("groundstation.decoders.output")
@@ -52,7 +53,7 @@ class DecoderService:
         state: StateStore,
         gate: DecodeGate,
         passes: Dict[str, Pass],
-        waterfalls: WaterfallStore,
+        artifacts: ArtifactStore,
         iq_consumers: Optional[List[str]] = None,
     ) -> None:
         self._cfg = cfg
@@ -60,7 +61,7 @@ class DecoderService:
         self._state = state
         self._gate = gate
         self._passes = passes
-        self._waterfalls = waterfalls
+        self._artifacts = artifacts
         # Non-decoder consumers of recording.bin (e.g. skymap analyzer).
         # `_after_all_decoders` waits for both decoders and these to settle.
         self._iq_consumers: List[str] = list(iq_consumers or [])
@@ -173,8 +174,18 @@ class DecoderService:
             self._active_kill_event.set()
 
     def waiting(self) -> int:
-        """Decoder runs not finished yet: queued plus the one in flight."""
-        return len(self._in_queue) + (1 if self._current is not None else 0)
+        """Backlog for the skip rule: unfinished runs (queued plus the one in
+        flight) of decoders whose role counts toward the backlog."""
+        keys = set(self._in_queue)
+        if self._current is not None:
+            keys.add((self._current[0], self._current[1]))
+        return sum(1 for pid, idx in keys if self._counts_toward_backlog(pid, idx))
+
+    def _counts_toward_backlog(self, pass_id: str, decoder_index: int) -> bool:
+        p = self._passes.get(pass_id)
+        if p is None or decoder_index >= len(p.satellite.decoder):
+            return False
+        return p.satellite.decoder[decoder_index].policy.counts_toward_backlog
 
     async def _on_event(self, event: E.Event) -> None:
         if isinstance(event, E.RecordingCompleted):
@@ -182,13 +193,13 @@ class DecoderService:
             if not p:
                 logger.warning("decoder got RecordingCompleted for unknown pass %s", event.pass_id)
                 return
-            pending = list(range(len(p.satellite.decoder)))
+            decoders = p.satellite.decoder
+            pending = sorted(range(len(decoders)), key=lambda i: not decoders[i].policy.runs_first)
             p.decoders_pending = pending
             # Initialise the IQ-consumer gate so non-decoder consumers
             # (e.g. skymap) can hold the IQ alive until they're done.
             p.iq_consumers_pending = list(self._iq_consumers)
             p.iq_consumers_done = []
-            p.status = PassStatus.RECORDED
             await self._state.save_pass_async(p)
             for idx in pending:
                 await self._state.decode_put_async(p.id, idx, attempt=0)
@@ -227,8 +238,8 @@ class DecoderService:
             return
 
         decoder = p.satellite.decoder[decoder_index]
-        decoder_name = decoder.name or f"decoder_{decoder_index}"
-        output_dir = p.pass_dir if not decoder.name else os.path.join(p.pass_dir, decoder_name)
+        decoder_name = decoder.name
+        output_dir = p.pass_dir if decoder.policy.output_in_pass_dir else os.path.join(p.pass_dir, decoder_name)
 
         if not p.recording_path or not os.path.isfile(p.recording_path):
             error = f"recording file missing at {p.recording_path}"
@@ -241,8 +252,7 @@ class DecoderService:
             )
             return
 
-        p.status = PassStatus.DECODING
-        await self._state.save_pass_async(p)
+        await set_pass_status(p, PassStatus.DECODING, self._state, self._bus)
 
         loop = asyncio.get_running_loop()
 
@@ -405,16 +415,10 @@ class DecoderService:
                 )
             )
         else:
-            # Copy the waterfall PNG into the persistent store before
-            # TransferService takes ownership of the source path and
-            # eventually deletes it post-upload. The web UI reads from this
-            # store so users can review the spectrogram of recent passes.
-            waterfall_persisted = False
-            for out_path in surviving:
-                if os.path.basename(out_path) == WATERFALL_FILENAME:
-                    if self._waterfalls.persist(pass_id, out_path) is not None:
-                        waterfall_persisted = True
-                    break
+            # Keep the images (waterfall, decoder products) for the web UI
+            # before TransferService uploads and deletes the pass dir.
+            images_before = self._artifacts.images(pass_id)
+            images = self._artifacts.add(pass_id, p.pass_dir, surviving)
 
             # Persist the transfer requests FIRST — before marking the
             # decoder done and tombstoning its queue entry. A crash in the
@@ -451,12 +455,8 @@ class DecoderService:
                     outputs=rels,
                 )
             )
-            if waterfall_persisted:
-                # Re-broadcast the passes table so connected clients learn
-                # has_waterfall just flipped to true for this pass.
-                await self._bus.publish(
-                    E.PassesTableChanged(passes=list(self._passes.values()))
-                )
+            if images != images_before:
+                await self._bus.publish(E.PassImagesChanged(pass_id=pass_id, images=images))
 
         if self._iq_release_ready(p) and p.id not in self._cleanup_launched:
             # Cleanup (incl. waiting up to 30 minutes for the IQ upload) must
@@ -484,8 +484,7 @@ class DecoderService:
         If the pass's IQ is to be uploaded, compress it locally first
         (minutes) and queue the .zst; then remove the .bin. Otherwise
         just remove the .bin."""
-        p.status = PassStatus.DECODED if p.decoders_done else PassStatus.FAILED
-        await self._state.save_pass_async(p)
+        await set_pass_status(p, PassStatus.DECODED, self._state, self._bus)
 
         iq = p.recording_path
         if iq and os.path.isfile(iq):
@@ -541,8 +540,13 @@ class DecoderService:
                     await self._state.transfer_put_async(req)
                     await self._bus.publish(E.TransferQueued(request=req))
 
-        p.status = PassStatus.DONE if p.decoders_done else PassStatus.FAILED
-        await self._state.save_pass_async(p)
+        if p.data_decoders_done():
+            await set_pass_status(p, PassStatus.DONE, self._state, self._bus)
+        else:
+            await set_pass_status(
+                p, PassStatus.FINISHED_WITHOUT_DECODES, self._state, self._bus,
+                reason="no decoder produced output",
+            )
 
     def _nas_path(self, p: Pass, *parts: str) -> str:
         prefix = os.path.join(

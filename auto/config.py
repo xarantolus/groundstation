@@ -8,7 +8,7 @@ from typing import Any, Dict, List
 import yaml
 from pydantic import ValidationError
 
-from .models import Decoder, GroundstationConfig, Satellite
+from .models import GroundstationConfig, Satellite
 
 
 def _expand_decoder_matrix(raw: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -51,6 +51,11 @@ def _normalize_decoder_field(raw: Any) -> List[Dict[str, Any]]:
         raw_list = raw
     else:
         raise ValueError("decoder must be a dict, list, or null")
+    for d in raw_list:
+        # Decoder.name is also the output dir; persisted legacy passes
+        # without one are migrated by the model, the config must be explicit.
+        if not isinstance(d, dict) or not d.get("name"):
+            raise ValueError(f"every decoder needs a name (and role: waterfall for waterfalls): {d!r}")
     return [e for d in raw_list for e in _expand_decoder_matrix(d)]
 
 
@@ -82,7 +87,10 @@ def load_config(path: str) -> GroundstationConfig:
             raise SystemExit(f"{path}: satellites[{idx}] must be a mapping")
         sat_input = dict(sat_raw)
         if "decoder" in sat_input:
-            sat_input["decoder"] = _normalize_decoder_field(sat_input["decoder"])
+            try:
+                sat_input["decoder"] = _normalize_decoder_field(sat_input["decoder"])
+            except ValueError as e:
+                raise SystemExit(f"{path}: satellites[{idx}] ({sat_raw.get('name', '?')}): {e}") from None
         try:
             sat = Satellite.model_validate(sat_input)
         except ValidationError as e:
@@ -97,11 +105,11 @@ def load_config(path: str) -> GroundstationConfig:
                 f"iq_upload={sat.iq_upload!r} requires at least one decoder"
             )
         if sat.iq_upload == "on_decode" and not any(
-            d.name is not None for d in sat.decoder
+            d.policy.produces_data for d in sat.decoder
         ):
             raise SystemExit(
                 f"{path}: satellites[{idx}] ({sat.name}): "
-                "iq_upload='on_decode' but no non-waterfall decoder is configured "
+                "iq_upload='on_decode' but no data-producing decoder is configured "
                 "— IQ would never be uploaded; set iq_upload='always' or "
                 "add a real decoder"
             )
@@ -137,5 +145,3 @@ def load_config(path: str) -> GroundstationConfig:
     return cfg
 
 
-def decoder_display_name(d: Decoder, index: int) -> str:
-    return d.name or f"decoder_{index}"

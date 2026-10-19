@@ -72,6 +72,7 @@
   .status-recording,.status-decoding{background:var(--accent);color:#000}
   .status-done{background:var(--live);color:#000}
   .status-failed{background:var(--err);color:#fff}
+  .status-skipped,.status-finished_without_decodes{background:var(--surface2);color:var(--text2);border:1px dashed var(--text2)}
   .status-recorded_partial{background:var(--warn);color:#000}
   .queue-note{color:var(--text2);font-size:.9em;padding:8px;font-family:var(--mono)}
 
@@ -105,9 +106,12 @@
   .modal-stats .k{color:var(--text2)}
   .modal-polar-wrap{aspect-ratio:1/1;width:min(100%,28rem);justify-self:center;background:var(--surface2);border-radius:6px;position:relative}
   .modal-polar-wrap canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
-  .modal-waterfall{margin-top:.5rem}
-  .modal-waterfall img{width:100%;height:auto;display:block;border-radius:4px;background:#000}
-  .modal-waterfall-missing{color:var(--text2);font-size:.9em;text-align:center;padding:1rem}
+  .modal-gallery{display:grid;grid-template-columns:repeat(auto-fill,minmax(10rem,1fr));gap:.5rem;margin-top:.5rem}
+  .modal-gallery figure{margin:0;min-width:0}
+  .modal-gallery figure.wide{grid-column:1/-1}
+  .modal-gallery img{width:100%;height:auto;display:block;border-radius:4px;background:#000}
+  .modal-gallery figcaption{color:var(--text2);font-size:.8em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .modal-gallery-missing{color:var(--text2);font-size:.9em;text-align:center;padding:1rem}
 </style>
 </head>
 <body>
@@ -239,10 +243,9 @@ function renderPasses(){
   if (!state.passes.length){ body.innerHTML = '<tr><td colspan="6" class="dim">No upcoming overpasses.</td></tr>'; return; }
   const past = state.passes.filter(p => new Date(p.pass_info.end_time) <= now);
   const future = state.passes.filter(p => new Date(p.pass_info.end_time) > now);
-  // Keep the last 3 finished passes visible — that's the LRU window the
-  // backend retains waterfalls for, so the user can still click those rows
-  // and review their spectrograms.
-  const display = past.slice(-3).concat(future).slice(0, 15);
+  // Keep the last 10 finished passes visible: the backend keeps the images
+  // (waterfall, decoder products) of exactly that many passes.
+  const display = past.slice(-10).concat(future.slice(0, 12));
   const selectedId = effectiveSelectedPassId();
   const rows = display.map(p => {
     const start = new Date(p.pass_info.start_time);
@@ -259,8 +262,7 @@ function renderPasses(){
     const norad = p.satellite.norad;
     const name = escapeHtml(p.satellite.name);
     const nameHtml = norad ? `<a href="https://www.n2yo.com/satellite/?s=${encodeURIComponent(norad)}" target="_blank" rel="noreferrer" data-stop-row>${name}</a>` : name;
-    const status = escapeHtml(p.status);
-    return `<tr class="${cls.join(' ')}" data-pass-id="${escapeHtml(p.id)}"><td>${nameHtml}</td><td class="cell-start">${escapeHtml(startStr)}</td><td class="cell-duration">${escapeHtml(durationStr)}</td><td>${p.pass_info.max_elevation.toFixed(1)}°</td><td>${dir}</td><td><span class="status-pill status-${status}">${status}</span></td></tr>`;
+    return `<tr class="${cls.join(' ')}" data-pass-id="${escapeHtml(p.id)}"><td>${nameHtml}</td><td class="cell-start">${escapeHtml(startStr)}</td><td class="cell-duration">${escapeHtml(durationStr)}</td><td>${p.pass_info.max_elevation.toFixed(1)}°</td><td>${dir}</td><td>${statusPill(p)}</td></tr>`;
   });
   body.innerHTML = rows.join("");
 }
@@ -422,14 +424,19 @@ function applyEvent(ev){
     invalidatePassCaches(p.id);
     renderPasses();
     redrawTracking();
+  } else if (t === 'pass_status_changed'){
+    const p = state.passes.find(x => x.id === ev.pass_id);
+    if (p){ p.status = ev.status; p.status_reason = ev.reason; }
+    renderPasses(); updateOpenModal(ev.pass_id);
+  } else if (t === 'pass_images_changed'){
+    const p = state.passes.find(x => x.id === ev.pass_id);
+    if (p) p.images = ev.images;
+    updateOpenModal(ev.pass_id);
   } else if (t === 'recording_started'){
-    state.recording = ev.pass_id; setPassStatus(ev.pass_id, 'recording'); renderPasses(); redrawTracking();
-  } else if (t === 'recording_completed'){
+    state.recording = ev.pass_id; renderPasses(); redrawTracking();
+  } else if (t === 'recording_completed' || t === 'recording_failed'){
     if (state.recording === ev.pass_id) state.recording = null;
-    setPassStatus(ev.pass_id, 'recorded'); renderPasses(); redrawTracking();
-  } else if (t === 'recording_failed'){
-    if (state.recording === ev.pass_id) state.recording = null;
-    setPassStatus(ev.pass_id, 'failed'); renderPasses();
+    renderPasses(); redrawTracking();
   } else if (t === 'decode_queued'){
     const k = `${ev.pass_id}#${ev.decoder_index}`;
     if (!pendingKeys.has(k)){ pendingKeys.add(k); state.pending_decoders = pendingKeys.size; }
@@ -440,8 +447,7 @@ function applyEvent(ev){
     state.pending_decoders = pendingKeys.size;
     state.decoding = {pass_id: ev.pass_id, decoder_index: ev.decoder_index, decoder_name: ev.decoder_name};
     state.decoder_log = [];
-    setPassStatus(ev.pass_id, 'decoding');
-    renderDecoder(); renderPasses();
+    renderDecoder();
   } else if (t === 'decode_completed' || t === 'decode_failed'){
     const k = `${ev.pass_id}#${ev.decoder_index}`;
     pendingKeys.delete(k);
@@ -495,9 +501,32 @@ function applyEvent(ev){
   }
 }
 
-function setPassStatus(pass_id, status){
-  const p = state.passes.find(x => x.id === pass_id);
-  if (p) p.status = status;
+function statusPill(p){
+  const label = escapeHtml(String(p.status).replaceAll('_', ' '));
+  const title = p.status_reason ? ` title="${escapeHtml(p.status_reason)}"` : '';
+  return `<span class="status-pill status-${escapeHtml(p.status)}"${title}>${label}</span>`;
+}
+
+function galleryHtml(pass){
+  const images = pass.images || [];
+  if (!images.length) return '<div class="modal-gallery-missing">No images for this pass (yet).</div>';
+  const base = `/artifacts/${encodeURIComponent(pass.id)}/`;
+  return '<div class="modal-gallery">' + images.map(rel => {
+    const url = base + rel.split('/').map(encodeURIComponent).join('/');
+    const wide = rel === 'waterfall.png' ? ' class="wide"' : '';
+    return `<figure${wide}><a href="${url}" target="_blank" rel="noreferrer"><img src="${url}" alt="${escapeHtml(rel)}" loading="lazy"></a><figcaption title="${escapeHtml(rel)}">${escapeHtml(rel)}</figcaption></figure>`;
+  }).join('') + '</div>';
+}
+
+function updateOpenModal(pass_id, fallback){
+  if (modalState.openPassId !== pass_id) return;
+  const p = state.passes.find(x => x.id === pass_id) || fallback;
+  const modal = document.getElementById('pass-modal');
+  if (!p || !modal) return;
+  const status = modal.querySelector('#modal-status');
+  if (status) status.innerHTML = statusPill(p) + (p.status_reason ? ` <span class="dim">${escapeHtml(p.status_reason)}</span>` : '');
+  const gallery = modal.querySelector('#modal-gallery');
+  if (gallery) gallery.innerHTML = galleryHtml(p);
 }
 
 function renderAll(){ renderPasses(); renderTransfers(); renderDecoder(); renderLogs(); }
@@ -1279,9 +1308,6 @@ function openPassModal(pass){
     const recE = new Date(pi.recording_end_override || pi.end_time);
     recRow = `<span class="k">Recording</span><span style="color:var(--track-rec)">${escapeHtml(recS.toLocaleString(undefined,{hour12:false}))} → ${escapeHtml(recE.toLocaleTimeString(undefined,{hour12:false}))} <span class="dim">(trimmed for higher-priority pass)</span></span>`;
   }
-  const waterfallHtml = pass.has_waterfall
-    ? `<div class="modal-waterfall"><img src="/waterfalls/${encodeURIComponent(pass.id)}.png" alt="waterfall for ${escapeHtml(sat.name)}" loading="lazy"></div>`
-    : `<div class="modal-waterfall-missing">No waterfall available for this pass yet.</div>`;
 
   backdrop.innerHTML = `
     <div class="modal-card" role="dialog" aria-modal="true" aria-label="Pass details">
@@ -1292,7 +1318,7 @@ function openPassModal(pass){
       <div class="modal-body">
         <div class="modal-polar-wrap"><canvas id="modal-polar-canvas"></canvas></div>
         <div class="modal-stats">
-          <span class="k">Status</span><span><span class="status-pill status-${escapeHtml(pass.status)}">${escapeHtml(pass.status)}</span></span>
+          <span class="k">Status</span><span id="modal-status"></span>
           <span class="k">Start</span><span>${escapeHtml(start.toLocaleString(undefined,{hour12:false}))} (${dirStart})</span>
           <span class="k">End</span><span>${escapeHtml(end.toLocaleString(undefined,{hour12:false}))} (${dirEnd})</span>
           <span class="k">Duration</span><span>${pi.duration_minutes.toFixed(2)} min</span>
@@ -1302,10 +1328,11 @@ function openPassModal(pass){
           <span class="k">Bandwidth</span><span>${(sat.bandwidth/1e3).toFixed(1)} kHz</span>
           <span class="k">NORAD</span><span>${escapeHtml(sat.norad)}</span>
         </div>
-        ${waterfallHtml}
+        <div id="modal-gallery"></div>
       </div>
     </div>`;
   document.body.appendChild(backdrop);
+  updateOpenModal(pass.id, pass);
 
   backdrop.addEventListener('click', e => { if (e.target === backdrop) closePassModal(); });
   backdrop.querySelector('.modal-close').addEventListener('click', closePassModal);

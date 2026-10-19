@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import datetime
 from enum import Enum
-from typing import Any, List, Literal, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -13,10 +14,39 @@ IQUploadMode = Literal["never", "on_decode", "always"]
 IQ_DATA_FILE_EXTENSION = ".bin"
 
 
+DecoderRole = Literal["waterfall", "decoder"]
+
+
+@dataclass(frozen=True)
+class RolePolicy:
+    """How the pipeline treats a decoder of a given role."""
+
+    # Output counts as "decoded" (pass outcome, iq_upload=on_decode).
+    produces_data: bool
+    # Counts toward the decode backlog that makes low-priority passes skip.
+    counts_toward_backlog: bool
+    # Writes into the pass directory itself instead of a <name>/ subdir
+    # (keeps waterfall.png at the top of the pass folder on the NAS).
+    output_in_pass_dir: bool
+    # Queued ahead of the other decoders of the same pass.
+    runs_first: bool
+
+
+ROLE_POLICIES: Dict[str, RolePolicy] = {
+    "waterfall": RolePolicy(
+        produces_data=False, counts_toward_backlog=False, output_in_pass_dir=True, runs_first=True
+    ),
+    "decoder": RolePolicy(
+        produces_data=True, counts_toward_backlog=True, output_in_pass_dir=False, runs_first=False
+    ),
+}
+
+
 class Decoder(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    name: str | None = None
+    name: str
+    role: DecoderRole = "decoder"
     container: str
     podman_args: str | None = None
     args: str | None = None
@@ -33,6 +63,21 @@ class Decoder(BaseModel):
         if isinstance(v, dict):
             return {str(k): str(val) for k, val in v.items()}
         return v
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_nameless_waterfall(cls, v: Any) -> Any:
+        # Passes persisted before decoder roles existed marked the waterfall
+        # by leaving `name` out.
+        if isinstance(v, dict) and v.get("name") is None and "role" not in v:
+            v = dict(v)
+            v["name"] = "waterfall"
+            v["role"] = "waterfall"
+        return v
+
+    @property
+    def policy(self) -> RolePolicy:
+        return ROLE_POLICIES[self.role]
 
 
 class Satellite(BaseModel):
@@ -108,8 +153,22 @@ class PassStatus(str, Enum):
     DECODING = "decoding"
     DECODED = "decoded"
     UPLOADING = "uploading"
-    DONE = "done"
-    FAILED = "failed"
+    # Terminal outcomes; Pass.status_reason says why.
+    DONE = "done"  # at least one data decoder produced output
+    FINISHED_WITHOUT_DECODES = "finished_without_decodes"  # recorded, nothing decoded
+    SKIPPED = "skipped"  # deliberately not recorded
+    FAILED = "failed"  # an error stopped the pass
+
+
+TERMINAL_STATUSES = frozenset(
+    {
+        PassStatus.DONE,
+        PassStatus.FINISHED_WITHOUT_DECODES,
+        PassStatus.SKIPPED,
+        PassStatus.FAILED,
+        PassStatus.RECORDED_PARTIAL,
+    }
+)
 
 
 class Pass(BaseModel):
@@ -120,6 +179,8 @@ class Pass(BaseModel):
     pass_info: PassInfo
     pass_dir: str
     status: PassStatus = PassStatus.PREDICTED
+    # Human-readable why for the current status (skip rule, error, ...).
+    status_reason: str | None = None
     recording_path: str | None = None
     decoders_pending: List[int] = Field(default_factory=list)
     decoders_done: List[int] = Field(default_factory=list)
@@ -134,6 +195,20 @@ class Pass(BaseModel):
     created_at: datetime.datetime = Field(default_factory=datetime.datetime.now)
     updated_at: datetime.datetime = Field(default_factory=datetime.datetime.now)
 
+    def set_status(self, status: PassStatus, reason: str | None = None) -> None:
+        """Only change status through here (or auto.lifecycle.set_pass_status,
+        which also persists and announces it)."""
+        self.status = status
+        self.status_reason = reason
+        self.updated_at = datetime.datetime.now()
+
+    def data_decoders_done(self) -> bool:
+        return any(
+            self.satellite.decoder[i].policy.produces_data
+            for i in self.decoders_done
+            if i < len(self.satellite.decoder)
+        )
+
     @staticmethod
     def make_id(sat: Satellite, pass_info: PassInfo) -> str:
         ts = pass_info.start_time.strftime("%Y-%m-%d_%H-%M-%S")
@@ -144,21 +219,15 @@ class Pass(BaseModel):
 def should_upload_iq(p: Pass) -> bool:
     """Decide whether to upload the raw IQ recording for a pass.
 
-    `on_decode` (the default) requires that at least one non-waterfall
-    decoder produced output that survived its filters — i.e. its index is
-    in `decoders_done`. Waterfall decoders are identified by `name is None`,
-    matching the convention used in `auto/decoder.py` for output-dir routing.
+    `on_decode` (the default) requires that at least one data-producing
+    decoder (see RolePolicy) produced output that survived its filters.
     """
     mode = p.satellite.iq_upload
     if mode == "never" or not p.satellite.decoder:
         return False
     if mode == "always":
         return True
-    return any(
-        idx in p.decoders_done
-        for idx, dec in enumerate(p.satellite.decoder)
-        if dec.name is not None
-    )
+    return p.data_decoders_done()
 
 
 class TransferRequest(BaseModel):

@@ -136,6 +136,8 @@ class ViewModel:
             self.passes = [p.model_copy() for p in event.passes]
         elif isinstance(event, (E.PassPredicted, E.PassUpcoming, E.PassStarted, E.PassEnded)):
             self._upsert_pass(event.pass_)
+        elif isinstance(event, E.PassStatusChanged):
+            self._update_pass_status(event.pass_id, event.status, event.reason)
         elif isinstance(event, E.RecordingStarted):
             # Recording start triggers a kill of any active decoder. Mark it as
             # ended now (rather than waiting for cleanup-induced DecodeFailed,
@@ -143,15 +145,9 @@ class ViewModel:
             if self.decoding is not None:
                 self._mark_decoding_ended()
             self.recording_pass_id = event.pass_id
-            self._update_pass_status(event.pass_id, PassStatus.RECORDING)
-        elif isinstance(event, E.RecordingCompleted):
+        elif isinstance(event, (E.RecordingCompleted, E.RecordingFailed)):
             if self.recording_pass_id == event.pass_id:
                 self.recording_pass_id = None
-            self._update_pass_status(event.pass_id, PassStatus.RECORDED)
-        elif isinstance(event, E.RecordingFailed):
-            if self.recording_pass_id == event.pass_id:
-                self.recording_pass_id = None
-            self._update_pass_status(event.pass_id, PassStatus.FAILED)
         elif isinstance(event, E.DecodeQueued):
             self.decoders_pending.add((event.pass_id, event.decoder_index))
         elif isinstance(event, E.DecodeStarted):
@@ -163,7 +159,6 @@ class ViewModel:
             )
             self.last_decoding = self.decoding.model_copy()
             self.decoding_ended_at = None
-            self._update_pass_status(event.pass_id, PassStatus.DECODING)
         elif isinstance(event, (E.DecodeCompleted, E.DecodeFailed)):
             self.decoders_pending.discard((event.pass_id, event.decoder_index))
             if self.decoding and self.decoding.pass_id == event.pass_id and self.decoding.decoder_index == event.decoder_index:
@@ -273,8 +268,10 @@ class ViewModel:
         self.passes.append(p.model_copy())
         self.passes.sort(key=lambda x: x.pass_info.start_time)
 
-    def _update_pass_status(self, pass_id: str, status: PassStatus) -> None:
+    def _update_pass_status(
+        self, pass_id: str, status: PassStatus, reason: str | None
+    ) -> None:
         for p in self.passes:
             if p.id == pass_id:
-                p.status = status
+                p.set_status(status, reason)
                 return

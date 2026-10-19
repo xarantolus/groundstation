@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Tuple
 from . import events as E
 from .bus import EventBus, Subscription, run_subscriber
 from .decode_gate import DecodeGate
-from .models import GroundstationConfig, Pass, PassInfo, PassStatus, Satellite
+from .models import TERMINAL_STATUSES, GroundstationConfig, Pass, PassInfo, PassStatus, Satellite
 from .pass_predictor import PassPredictor
 from .state import StateStore
 
@@ -175,7 +175,7 @@ class SchedulerService:
         for dead_id in list(self._known_passes.keys()):
             p = self._known_passes[dead_id]
             should_drop = False
-            if p.status in (PassStatus.DONE, PassStatus.FAILED, PassStatus.RECORDED_PARTIAL):
+            if p.status in TERMINAL_STATUSES:
                 should_drop = True
             elif p.status == PassStatus.PREDICTED and p.pass_info.end_time <= now:
                 # end_time already passed and we never recorded it — expire.
@@ -187,7 +187,7 @@ class SchedulerService:
             if task and not task.done():
                 task.cancel()
             # Always delete the on-disk JSON for dropped passes. Terminal
-            # passes (DONE/FAILED/RECORDED_PARTIAL) were previously left on
+            # passes (TERMINAL_STATUSES) were previously left on
             # disk, slowly accumulating one file per completed pass.
             # Transfers outlive the pass record (they have their own queue
             # keyed by req.id), so dropping the pass JSON is safe even if
@@ -207,7 +207,7 @@ class SchedulerService:
         for p in self._known_passes.values():
             if p.satellite.name != sat.name:
                 continue
-            if p.status in (PassStatus.DONE, PassStatus.FAILED, PassStatus.RECORDED_PARTIAL):
+            if p.status in TERMINAL_STATUSES:
                 continue
             if pi.start_time < p.pass_info.end_time and p.pass_info.start_time < pi.end_time:
                 return p
@@ -275,9 +275,6 @@ class SchedulerService:
     async def _on_event(self, event: E.Event) -> None:
         if isinstance(event, E.RecordingStarted):
             self._gate.on_recording(True)
-        elif isinstance(event, E.RecordingFailed) and event.skipped:
-            # Nothing was recorded; another recording may still be running.
-            pass
         elif isinstance(event, (E.RecordingCompleted, E.RecordingFailed)):
             self._gate.on_recording(False)
         elif isinstance(event, E.PassEnded):

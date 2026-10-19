@@ -15,7 +15,9 @@ satellites:
     priority: 61
     iq_upload: always
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
 
   - name: FramSat-1
     norad: 100610
@@ -27,7 +29,9 @@ satellites:
     priority: 60
     iq_upload: never
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
 
 
   - name: ASRTU-1
@@ -40,7 +44,9 @@ satellites:
     priority: 15
     iq_upload: never
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: lrpt
         container: ghcr.io/xarantolus/groundstation/gr-satellites:latest
         env:
@@ -58,7 +64,9 @@ satellites:
     gain: 30
     priority: 7
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: lrpt
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
         args: --satellite_number=M2-3 --fill_missing
@@ -92,7 +100,9 @@ satellites:
     gain: 30
     priority: 7
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: lrpt
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
         args: --satellite_number=M2-4 --fill_missing
@@ -125,7 +135,9 @@ satellites:
     lo_offset: 100e3
     priority: 6
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
@@ -145,7 +157,9 @@ satellites:
     priority: 7
     iq_upload: always
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
@@ -160,7 +174,9 @@ satellites:
     lo_offset: 100e3
     priority: 6
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
@@ -178,7 +194,9 @@ satellites:
     lo_offset: 100e3
     priority: 6
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
@@ -195,7 +213,9 @@ satellites:
     lo_offset: 100e3
     priority: 6
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
@@ -212,7 +232,9 @@ satellites:
     lo_offset: 100e3
     priority: 6
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
@@ -230,7 +252,9 @@ satellites:
     # Temporary AX100 Mode 5 debugging: always record, keep IQ at 96 kS/s.
     priority: 7
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
@@ -247,7 +271,9 @@ satellites:
     lo_offset: 100e3
     priority: 6
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
@@ -264,7 +290,9 @@ satellites:
     lo_offset: 100e3
     priority: 6
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
@@ -281,7 +309,9 @@ satellites:
     lo_offset: 100e3
     priority: 6
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
@@ -299,7 +329,9 @@ satellites:
     # Temporary AX100 Mode 5 debugging: always record, keep IQ at 96 kS/s.
     priority: 7
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
@@ -316,7 +348,9 @@ satellites:
     # Temporary AX100 Mode 5 debugging: always record, keep IQ at 96 kS/s.
     priority: 7
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
@@ -334,7 +368,9 @@ satellites:
     # Temporary AX100 Mode 5 debugging: always record, keep IQ at 96 kS/s.
     priority: 7
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
@@ -350,7 +386,9 @@ satellites:
     lo_offset: 100e3
     priority: 4
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: ax100
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
@@ -369,7 +407,9 @@ satellites:
     priority: 2
     iq_upload: never
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: geoscan
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
         min_size_bytes: 1
@@ -390,7 +430,9 @@ satellites:
     priority: 2
     iq_upload: never
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: geoscan
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
         min_size_bytes: 1
@@ -410,7 +452,9 @@ satellites:
     priority: 2
     iq_upload: never
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: geoscan
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
         min_size_bytes: 1
@@ -430,7 +474,9 @@ satellites:
     priority: 2
     iq_upload: never
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: sstv_robot36
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
         args: --sstv_mode=Robot36 --satellite_norad=67290 --satellite_frequency=437.350e6 --enable_doppler=false --bandwidth=12500
@@ -448,7 +494,9 @@ satellites:
     priority: 2
     iq_upload: never
     decoder:
-      - container: ghcr.io/xarantolus/groundstation/waterfall:latest
+      - name: waterfall
+        role: waterfall
+        container: ghcr.io/xarantolus/groundstation/waterfall:latest
       - name: sstv_robot36
         container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
         args: --sstv_mode=Robot36 --satellite_norad=67284 --satellite_frequency=436.320e6 --enable_doppler=false --bandwidth=12500

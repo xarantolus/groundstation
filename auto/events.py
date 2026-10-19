@@ -5,7 +5,7 @@ from typing import List, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import Pass, TransferRequest
+from .models import Pass, PassStatus, TransferRequest
 
 
 class _EventBase(BaseModel):
@@ -48,6 +48,22 @@ class PassEnded(_EventBase):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
 
+class PassStatusChanged(_EventBase):
+    type: Literal["pass_status_changed"] = "pass_status_changed"
+    pass_id: str
+    status: PassStatus
+    reason: str | None = None
+
+
+class PassImagesChanged(_EventBase):
+    """The set of images kept for a pass (waterfall, decoder products)
+    changed; paths are relative to the pass and served under /artifacts/."""
+
+    type: Literal["pass_images_changed"] = "pass_images_changed"
+    pass_id: str
+    images: List[str]
+
+
 class RecordingStarted(_EventBase):
     type: Literal["recording_started"] = "recording_started"
     pass_id: str
@@ -69,9 +85,6 @@ class RecordingFailed(_EventBase):
     type: Literal["recording_failed"] = "recording_failed"
     pass_id: str
     error: str
-    # Pass deliberately not recorded (no recorder ran), e.g. a low-priority
-    # pass skipped so queued decoders can catch up.
-    skipped: bool = False
 
 
 class DecodeQueued(_EventBase):
@@ -179,6 +192,8 @@ Event = Union[
     PassUpcoming,
     PassStarted,
     PassEnded,
+    PassStatusChanged,
+    PassImagesChanged,
     RecordingStarted,
     RecordingLog,
     RecordingCompleted,

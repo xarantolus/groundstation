@@ -12,6 +12,7 @@ from typing import Callable, Dict, Optional
 from . import events as E
 from .bus import EventBus, run_subscriber
 from .doppler import write_doppler_file, write_zero_doppler_file
+from .lifecycle import set_pass_status
 from .models import GroundstationConfig, Pass, PassStatus, TransferRequest
 from .podman import run_recorder
 from .scheduler import RECORDING_LEAD_SECONDS
@@ -221,9 +222,8 @@ class RecorderService:
                 await self._fail(p, f"doppler file generation failed: {e}")
                 return
 
-        p.status = PassStatus.RECORDING
         save_t0 = time.monotonic()
-        await self._state.save_pass_async(p)
+        await set_pass_status(p, PassStatus.RECORDING, self._state, self._bus)
         publish_t0 = time.monotonic()
         await self._bus.publish(E.RecordingStarted(pass_id=p.id))
         logger.info(
@@ -291,8 +291,7 @@ class RecorderService:
             return
 
         p.recording_path = path
-        p.status = PassStatus.RECORDED
-        await self._state.save_pass_async(p)
+        await set_pass_status(p, PassStatus.RECORDED, self._state, self._bus)
         await self._bus.publish(E.RecordingCompleted(pass_id=p.id, path=path))
 
         # IQ upload happens post-decode in DecoderService._after_all_decoders.
@@ -327,20 +326,18 @@ class RecorderService:
         if waiting == 0:
             return None
         return (
-            f"skipped: priority {p.satellite.priority} < {threshold} "
+            f"priority {p.satellite.priority} < {threshold} "
             f"and {waiting} decoder run(s) waiting"
         )
 
     async def _skip(self, p: Pass, reason: str) -> None:
-        p.status = PassStatus.FAILED
-        await self._state.save_pass_async(p)
-        logger.info("recorder: %s %s", p.id, reason)
-        await self._bus.publish(E.RecordingFailed(pass_id=p.id, error=reason, skipped=True))
+        # No recording event: the SDR was never touched.
+        logger.info("recorder: %s skipped: %s", p.id, reason)
+        await set_pass_status(p, PassStatus.SKIPPED, self._state, self._bus, reason=reason)
 
     async def _fail(self, p: Pass, reason: str) -> None:
-        p.status = PassStatus.FAILED
-        await self._state.save_pass_async(p)
         logger.error("recorder failed for %s: %s", p.id, reason)
+        await set_pass_status(p, PassStatus.FAILED, self._state, self._bus, reason=reason)
         await self._bus.publish(E.RecordingFailed(pass_id=p.id, error=reason))
 
     def _doppler_file_complete(self, p: Pass) -> bool:
