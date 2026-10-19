@@ -79,8 +79,10 @@ blocks:
 - name: deviation
   id: variable
   parameters:
-    comment: GMSK h=0.5 -> peak deviation = baud/4
-    value: baud_rate / 4
+    comment: "FSK deviation in Hz; also sets the demodulator's Carson filter\n(deviation\
+      \ + baud/2). AX100 satellites use ~baud/3..baud/2; 0.75*baud decoded\nthe\
+      \ most on recorded passes. Override per satellite with DEVIATION."
+    value: float(os.getenv("DEVIATION", baud_rate * 0.75))
   states:
     bus_sink: false
     bus_source: false

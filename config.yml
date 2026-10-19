@@ -165,6 +165,9 @@ satellites:
         min_size_bytes: 1
         env:
           BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+          # Narrow FSK (gr-satellites: 750 Hz at 2k4); the 0.75*baud default
+          # loses its packets.
+          DEVIATION: 750
   - name: INNOCUBE
     norad: 62616
     frequency: 435.950e6
