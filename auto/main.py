@@ -346,7 +346,7 @@ async def _run(cfg: GroundstationConfig, no_tui: bool) -> None:
         state,
         gate,
         passes_by_id,
-        waterfalls,
+        artifacts,
         iq_consumers=sorted(registered_iq_consumers),
     )
     recorder = RecorderService(cfg, bus, state, decoders_waiting=decoder.waiting)
