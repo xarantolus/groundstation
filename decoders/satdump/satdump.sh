@@ -20,6 +20,7 @@ cp /etc/groundstation/satdump-settings.json "${HOME}/.config/satdump/settings.js
 # SatDump v2's `pipeline <name>` registers params as CLI11 `add_flag`, which
 # only accepts `--key=value` (no space form), so all params here and in
 # config.yml decoder args must use `=`.
+rc=0
 satdump \
 	pipeline \
 	"${PIPELINE_NAME}" \
@@ -28,4 +29,10 @@ satdump \
 	"$@" \
 	baseband \
 	"${INPUT_FILE:-/data/recording.bin}" \
-	"${OUTPUT_DIR:-/output}"
+	"${OUTPUT_DIR:-/output}" || rc=$?
+
+# Colour composites SatDump 2.0-alpha no longer renders (Meteor 221); a
+# failure here must never fail the decoder.
+python3 /usr/bin/meteor_composites.py "${OUTPUT_DIR:-/output}" || true
+
+exit "$rc"

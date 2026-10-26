@@ -60,11 +60,12 @@ RUN --mount=type=cache,target=/var/cache/apt \
     apt -y update && \
     apt -y upgrade && \
     xargs -a /mnt/satdump/packages.runner apt install --no-install-recommends -qy && \
-    apt install --no-install-recommends -qy libhdf5-cpp-310 libhdf5-hl-310 && \
+    apt install --no-install-recommends -qy libhdf5-cpp-310 libhdf5-hl-310 python3-pil && \
     apt install --no-install-recommends -qy /mnt/satdump/build-res/satdump_*.deb
 
 COPY satdump.sh /usr/bin/satdump.sh
-RUN chmod +x /usr/bin/satdump.sh
+COPY meteor_composites.py /usr/bin/meteor_composites.py
+RUN chmod +x /usr/bin/satdump.sh /usr/bin/meteor_composites.py
 
 # Baked-in SatDump settings (disables Kepler/TLE auto-update); satdump.sh copies
 # this into $HOME/.config/satdump/settings.json at runtime.
