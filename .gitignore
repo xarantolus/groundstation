@@ -12,6 +12,8 @@ notes.md
 *.state
 # Runtime state dir (passes, transfer queues, persisted OMM cache, …)
 /state/
+# Daily-rotated app logs (tracker.log, decoders.log)
+/logs/
 **__pycache__**
 *.raw
 !.github/img/*

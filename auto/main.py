@@ -5,6 +5,7 @@ import asyncio
 import datetime
 import json
 import logging
+import logging.handlers
 import os
 import shutil
 import signal
@@ -39,30 +40,27 @@ from typing import Optional
 logger = logging.getLogger("groundstation")
 
 
-def _rotate_log(path: str) -> None:
-    """Move `foo.log` → `foo.old.log`. Called before handlers attach."""
-    if not os.path.exists(path):
-        return
-    old = path[:-4] + ".old.log" if path.endswith(".log") else path + ".old"
-    try:
-        os.replace(path, old)
-    except OSError:
-        logging.getLogger("groundstation").exception("could not rotate %s", path)
+LOG_DIR = "logs"
+# Rotated at midnight; this many previous days are kept besides today's file,
+# so at least the last 24 h survive restarts (which append, not rotate).
+LOG_KEEP_DAYS = 1
+
+
+def daily_log_handler(name: str, fmt: str, log_dir: str = LOG_DIR) -> logging.Handler:
+    os.makedirs(log_dir, exist_ok=True)
+    handler = logging.handlers.TimedRotatingFileHandler(
+        os.path.join(log_dir, name), when="midnight", backupCount=LOG_KEEP_DAYS, encoding="utf-8"
+    )
+    handler.setFormatter(logging.Formatter(fmt))
+    return handler
 
 
 def _setup_logging() -> None:
-    _rotate_log("tracker.log")
-    _rotate_log("decoders.log")
-
     root = logging.getLogger()
     root.setLevel(logging.INFO)
+    root.addHandler(daily_log_handler("tracker.log", "%(asctime)s %(levelname)s %(name)s: %(message)s"))
 
-    fh = logging.FileHandler("tracker.log", encoding="utf-8")
-    fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
-    root.addHandler(fh)
-
-    decoder_fh = logging.FileHandler("decoders.log", encoding="utf-8")
-    decoder_fh.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+    decoder_fh = daily_log_handler("decoders.log", "%(asctime)s %(message)s")
     decoder_logger = logging.getLogger("groundstation.decoders.output")
     decoder_logger.addHandler(decoder_fh)
     # propagate=False: otherwise every decoder line also lands in tracker.log.
