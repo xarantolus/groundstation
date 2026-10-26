@@ -398,6 +398,7 @@ async def run_decoder(
         "--name", container_name,
         *COMMON_FLAGS,
         *(["--userns=keep-id"] if not _is_root() else []),
+        *([] if decoder.network else ["--network=none"]),
         *sum([["-e", e] for e in envs], []),
         *shlex.split(decoder.podman_args or ""),
         "-v",

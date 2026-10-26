@@ -48,6 +48,10 @@ class Decoder(BaseModel):
     name: str
     role: DecoderRole = "decoder"
     container: str
+    # Decoders run offline: they only process the recording, and fetches of
+    # external data can break them (SatDump aborted on every run once the
+    # IERS server started answering with an HTML error page).
+    network: bool = False
     podman_args: str | None = None
     args: str | None = None
     env: dict[str, str] = Field(default_factory=dict)

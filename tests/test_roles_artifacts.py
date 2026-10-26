@@ -183,3 +183,27 @@ async def test_web_serves_artifacts_and_attaches_images(tmp_path: Path):
     web._apply_images_map(payload, await web._images_map(["SAT_1", "OTHER"]))
     assert payload["passes"][0]["images"] == ["waterfall.png", "x/img 1.png"]
     assert payload["passes"][1]["images"] == []
+
+
+# ---- decoder containers ----
+
+class _Captured(Exception):
+    pass
+
+
+@pytest.mark.parametrize("network,offline", [(False, True), (True, False)])
+@pytest.mark.asyncio
+async def test_decoders_run_offline_unless_network_is_enabled(tmp_path: Path, monkeypatch, network, offline):
+    from auto import podman
+
+    seen = {}
+
+    async def fake_exec(*cmd, **kwargs):
+        seen["cmd"] = cmd
+        raise _Captured
+
+    monkeypatch.setattr(podman.asyncio, "create_subprocess_exec", fake_exec)
+    dec = Decoder(name="lrpt", container="satdump:latest", network=network)
+    with pytest.raises(_Captured):
+        await podman.run_decoder(_sat(), dec, str(tmp_path), str(tmp_path / "out"))
+    assert ("--network=none" in seen["cmd"]) is offline
