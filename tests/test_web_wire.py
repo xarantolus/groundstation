@@ -63,3 +63,30 @@ def test_slim_pass_localizes_pass_info_times_and_trims():
     assert pi["recording_start_override"] is None
     # Non-time fields untouched.
     assert pi["omm"] == {"NORAD_CAT_ID": 56744}
+
+
+async def test_pwa_manifest_and_service_worker_are_served():
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from auto.bus import EventBus
+    from auto.models import GroundstationConfig
+    from auto.view import ViewModel
+    from auto.web import WebService
+
+    cfg = GroundstationConfig(
+        satellites=[], nas_directory="/nonexistent",
+        location_lat=0, location_lon=0, location_alt=0,
+    )
+    web = WebService(cfg, EventBus(), ViewModel(), None, skymap=None)
+    async with TestClient(TestServer(web._app)) as client:
+        r = await client.get("/manifest.webmanifest")
+        assert r.status == 200
+        assert r.headers["Content-Type"].startswith("application/manifest+json")
+        manifest = await r.json(content_type=None)
+        assert manifest["display"] == "standalone"
+        for icon in manifest["icons"]:
+            assert (await client.get(icon["src"])).status == 200
+
+        r = await client.get("/sw.js")
+        assert r.status == 200
+        assert "javascript" in r.headers["Content-Type"]

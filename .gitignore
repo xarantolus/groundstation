@@ -20,3 +20,4 @@ notes.md
 image_cleaner/target
 image_cleaner_cache**
 examples
+!auto/static/*.png

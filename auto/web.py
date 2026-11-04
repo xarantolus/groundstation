@@ -109,6 +109,8 @@ class WebService:
         self._app.router.add_get("/", self._index)
         self._app.router.add_get("/ws", self._ws)
         self._app.router.add_get("/static/{name}", self._static)
+        self._app.router.add_get("/manifest.webmanifest", self._manifest)
+        self._app.router.add_get("/sw.js", self._service_worker)
         self._app.router.add_get("/artifacts/{pass_id}/{path:.+}", self._artifact)
         self._app.router.add_get("/skymap", self._skymap_page)
         self._app.router.add_get("/api/skymap", self._api_skymap)
@@ -248,6 +250,19 @@ class WebService:
         if not await loop.run_in_executor(None, path.is_file):
             raise web.HTTPNotFound()
         return web.FileResponse(path, headers={"Cache-Control": "public, max-age=86400"})
+
+    async def _manifest(self, request: web.Request) -> web.StreamResponse:
+        return web.FileResponse(
+            STATIC_DIR / "manifest.webmanifest",
+            headers={"Content-Type": "application/manifest+json", "Cache-Control": "no-cache"},
+        )
+
+    async def _service_worker(self, request: web.Request) -> web.StreamResponse:
+        # Served from / so its scope covers the whole UI; no-cache so updates land.
+        return web.FileResponse(
+            STATIC_DIR / "sw.js",
+            headers={"Content-Type": "text/javascript", "Cache-Control": "no-cache"},
+        )
 
     async def _artifact(self, request: web.Request) -> web.StreamResponse:
         pass_id = request.match_info["pass_id"]

@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Groundstation</title>
+<meta name="theme-color" content="#121212">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
 <style>
   :root{
     --bg:#121212;--surface:#1e1e1e;--surface2:#2c2c2c;
@@ -1368,6 +1375,7 @@ function redrawModalPolar(){
 
 let ws;
 let retry = 500;
+let retryTimer = null;
 function connect(){
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${proto}//${location.host}/ws`);
@@ -1378,8 +1386,24 @@ function connect(){
     if (msg.kind === 'snapshot') applySnapshot(msg.snapshot);
     else if (msg.kind === 'event') applyEvent(msg.event);
   };
-  ws.onclose = () => { setTimeout(() => { retry = Math.min(retry * 2, 30000); connect(); }, retry); };
+  ws.onclose = () => { retryTimer = setTimeout(() => { retryTimer = null; retry = Math.min(retry * 2, 30000); connect(); }, retry); };
   ws.onerror = () => { try { ws.close(); } catch {} };
+}
+
+// Back from background (phone app switcher, laptop sleep): reconnect now
+// instead of waiting out the backoff of a socket that died meanwhile.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && retryTimer) {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+    retry = 500;
+    connect();
+  }
+});
+
+// Only registers in a secure context (https or localhost); harmless elsewhere.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(e => console.warn('sw', e));
 }
 
 loadCoastlines().then(() => redrawTracking());
