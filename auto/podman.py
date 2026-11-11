@@ -158,6 +158,48 @@ async def _podman_kill(container_name: str) -> None:
         logger.exception("podman kill %s failed", container_name)
 
 
+async def _podman_quiet(*args: str, timeout: float = 30) -> str:
+    """Run a podman command, return its stdout ('' on any failure)."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "podman", *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        return out.decode("utf-8", errors="replace")
+    except Exception:
+        logger.exception("podman %s failed", " ".join(args))
+        return ""
+
+
+RECORDER_PREFIX = "gs-recorder-"
+# A container that is still being created when it is killed can come up after
+# `podman kill` and the `podman run` client are gone. Remove it by name again
+# after this delay.
+RECORDER_STRAGGLER_DELAY_S = 5.0
+
+
+async def _remove_container(name: str) -> None:
+    await _podman_quiet("rm", "--force", "--time", "0", "--ignore", name)
+
+
+async def _remove_stale_recorders() -> None:
+    """Remove recorder containers left over from an earlier recording.
+
+    Recordings run strictly one after another, so when a new one starts no
+    other recorder container should exist. One that does still holds the SDR
+    (every new recording then fails with usb_claim_interface error -6) and may
+    keep writing into a deleted recording.bin until the disk is full.
+    """
+    names = (await _podman_quiet(
+        "ps", "--all", "--filter", f"name=^{RECORDER_PREFIX}", "--format", "{{.Names}}",
+    )).split()
+    for name in names:
+        logger.warning("removing leftover recorder container %s", name)
+        await _remove_container(name)
+
+
 async def _container_exists(name: str) -> bool:
     """True if podman knows about a container with this name (any state).
     Returns True on internal errors so a transient `podman` failure can't
@@ -279,7 +321,7 @@ async def run_recorder(
         envs.append(f"GAIN={sat.gain}")
     if sat.doppler_correction:
         envs.append("CORRECT_DOPPLER=1")
-    container_name = f"gs-recorder-{uuid.uuid4().hex[:12]}"
+    container_name = f"{RECORDER_PREFIX}{uuid.uuid4().hex[:12]}"
     cmd: List[str] = [
         "podman",
         "run",
@@ -298,6 +340,7 @@ async def run_recorder(
         f"{out_dir}:/data:z",
         RECORDER_IMAGE,
     ]
+    await _remove_stale_recorders()
     logger.info("running recorder: %s", " ".join(cmd))
 
     process = await asyncio.create_subprocess_exec(
@@ -331,10 +374,18 @@ async def run_recorder(
     except asyncio.CancelledError:
         await _terminate(process, container_name)
         await asyncio.gather(main_task, return_exceptions=True)
+        await _remove_container(container_name)
         raise
     finally:
         if stop_task is not None and not stop_task.done():
             stop_task.cancel()
+
+    if done != {main_task}:
+        # Stopped early: make sure the container is really gone, including
+        # one that was still starting while it was killed.
+        await _remove_container(container_name)
+        await asyncio.sleep(RECORDER_STRAGGLER_DELAY_S)
+        await _remove_container(container_name)
 
     out_file = os.path.join(out_dir, "recording.bin")
     if not os.path.isfile(out_file):
