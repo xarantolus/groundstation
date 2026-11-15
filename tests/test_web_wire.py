@@ -90,3 +90,9 @@ async def test_pwa_manifest_and_service_worker_are_served():
         r = await client.get("/sw.js")
         assert r.status == 200
         assert "javascript" in r.headers["Content-Type"]
+
+
+def test_slim_pass_keeps_satellite_tags():
+    entry = {"satellite": {"name": "SAT", "norad": "1", "tags": ["AX100"], "decoder": [{"name": "x"}]}}
+    _slim_pass_for_wire(entry)
+    assert entry["satellite"] == {"name": "SAT", "norad": "1", "tags": ["AX100"]}

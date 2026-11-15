@@ -94,6 +94,8 @@ class Satellite(BaseModel):
     # fresh launches whose CelesTrak object labels may still swap); `norad` is
     # then only the CelesTrak fallback.
     satnogs_id: str | None = None
+    # Free-form labels shown as pills in the web UI (e.g. "AX100").
+    tags: List[str] = Field(default_factory=list)
     frequency: float
     bandwidth: float
     sample_rate: float

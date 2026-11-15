@@ -28,10 +28,10 @@ _SAFE_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 # The Pass model carries full backend state, but the UI only reads a handful of
 # fields. The embedded Satellite config (especially its per-pass `decoder` list,
 # duplicated across hundreds of passes) dominates the snapshot — ~60% of it — yet
-# the frontend only uses satellite.name/norad. Slim each Pass to the wire shape
+# the frontend only uses satellite.name/norad/tags. Slim each Pass to the wire shape
 # the UI actually consumes; this is applied to both the initial snapshot and the
 # per-event `pass`/`passes` payloads. Full snapshots are still sent — just smaller.
-_SATELLITE_WIRE_KEEP = ("name", "norad")
+_SATELLITE_WIRE_KEEP = ("name", "norad", "tags")
 _PASS_WIRE_DROP = (
     "pass_dir",
     "recording_path",

@@ -128,6 +128,7 @@ satellites:
   # AX100 satellites
   - name: AISTECHSAT-2
     norad: 43768
+    tags: [AX100]
     frequency: 436.730e6
     bandwidth: 128e3
     gain: 30
@@ -148,6 +149,7 @@ satellites:
 
   - name: CATSAT
     norad: 60246
+    tags: [AX100]
     frequency: 437.185e6
     bandwidth: 80e3
     gain: 30
@@ -171,6 +173,7 @@ satellites:
           DEVIATION: 750
   - name: INNOCUBE
     norad: 62616
+    tags: [AX100]
     frequency: 435.950e6
     bandwidth: 128e3
     gain: 30
@@ -191,6 +194,7 @@ satellites:
 
   - name: K-HERO
     norad: 66660
+    tags: [AX100]
     frequency: 437.180e6
     bandwidth: 128e3
     gain: 30
@@ -210,6 +214,7 @@ satellites:
 
   - name: Luojia-1
     norad: 43485
+    tags: [AX100]
     frequency: 437.250e6
     bandwidth: 128e3
     gain: 30
@@ -229,6 +234,7 @@ satellites:
 
   - name: MIMAN
     norad: 52900
+    tags: [AX100]
     frequency: 436.500e6
     bandwidth: 128e3
     gain: 30
@@ -248,6 +254,7 @@ satellites:
 
   - name: NUSHSAT-1
     norad: 63211
+    tags: [AX100]
     frequency: 436.200e6
     bandwidth: 80e3
     gain: 30
@@ -269,6 +276,7 @@ satellites:
 
   - name: SNIPE-1
     norad: 56749
+    tags: [AX100]
     frequency: 435.450e6
     bandwidth: 128e3
     gain: 30
@@ -288,6 +296,7 @@ satellites:
     iq_upload: never
   - name: SNIPE-2
     norad: 56745
+    tags: [AX100]
     frequency: 436.000e6
     bandwidth: 128e3
     gain: 30
@@ -307,6 +316,7 @@ satellites:
     iq_upload: never
   - name: SNIPE-4
     norad: 56744
+    tags: [AX100]
     frequency: 437.800e6
     bandwidth: 128e3
     gain: 30
@@ -326,6 +336,7 @@ satellites:
     iq_upload: never
   - name: Suomi 100
     norad: 43804
+    tags: [AX100]
     frequency: 437.775e6
     bandwidth: 80e3
     gain: 30
@@ -346,6 +357,7 @@ satellites:
     iq_upload: always
   - name: UND ROADS 1
     norad: 64535
+    tags: [AX100]
     frequency: 435.400e6
     bandwidth: 80e3
     gain: 30
@@ -367,6 +379,7 @@ satellites:
     iq_upload: always
   - name: UND ROADS 2
     norad: 64549
+    tags: [AX100]
     frequency: 435.400e6
     bandwidth: 80e3
     gain: 30
@@ -387,6 +400,7 @@ satellites:
     iq_upload: always
   - name: BEE-1000
     norad: 66650
+    tags: [AX100]
     frequency: 436.500e6
     bandwidth: 128e3
     gain: 30

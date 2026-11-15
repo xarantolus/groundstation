@@ -76,6 +76,7 @@
   td a:hover{color:var(--accent)}
 
   .status-pill{display:inline-block;padding:2px 6px;border-radius:8px;font-size:.8em;background:var(--surface2);color:var(--text2)}
+  .tag-pill{display:inline-block;margin-left:6px;padding:0 5px;border:1px solid var(--accent);border-radius:8px;font-size:.72em;line-height:1.5;color:var(--accent);vertical-align:middle;font-weight:normal}
   .status-recording,.status-decoding{background:var(--accent);color:#000}
   .status-done{background:var(--live);color:#000}
   .status-failed{background:var(--err);color:#fff}
@@ -269,7 +270,7 @@ function renderPasses(){
     const norad = p.satellite.norad;
     const name = escapeHtml(p.satellite.name);
     const nameHtml = norad ? `<a href="https://www.n2yo.com/satellite/?s=${encodeURIComponent(norad)}" target="_blank" rel="noreferrer" data-stop-row>${name}</a>` : name;
-    return `<tr class="${cls.join(' ')}" data-pass-id="${escapeHtml(p.id)}"><td>${nameHtml}</td><td class="cell-start">${escapeHtml(startStr)}</td><td class="cell-duration">${escapeHtml(durationStr)}</td><td>${p.pass_info.max_elevation.toFixed(1)}°</td><td>${dir}</td><td>${statusPill(p)}</td></tr>`;
+    return `<tr class="${cls.join(' ')}" data-pass-id="${escapeHtml(p.id)}"><td>${nameHtml}${tagPills(p.satellite)}</td><td class="cell-start">${escapeHtml(startStr)}</td><td class="cell-duration">${escapeHtml(durationStr)}</td><td>${p.pass_info.max_elevation.toFixed(1)}°</td><td>${dir}</td><td>${statusPill(p)}</td></tr>`;
   });
   body.innerHTML = rows.join("");
 }
@@ -506,6 +507,10 @@ function applyEvent(ev){
     if (state.main_log.length > MAIN_LOG_CAP) state.main_log.splice(0, state.main_log.length - MAIN_LOG_CAP);
     renderLogs();
   }
+}
+
+function tagPills(sat){
+  return ((sat && sat.tags) || []).map(t => `<span class="tag-pill">${escapeHtml(t)}</span>`).join('');
 }
 
 function statusPill(p){
@@ -1241,7 +1246,7 @@ function updateTrackingCaption(mainPass){
   const isLive = passIsLive(mainPass);
   const stateLabel = isLive ? '<b style="color:var(--live)">LIVE</b>' : (start > new Date() ? 'next' : 'past');
   cap.innerHTML = `
-    <span><b>${escapeHtml(mainPass.satellite.name)}</b> · ${stateLabel}</span>
+    <span><b>${escapeHtml(mainPass.satellite.name)}</b>${tagPills(mainPass.satellite)} · ${stateLabel}</span>
     <span class="dim">${escapeHtml(start.toLocaleString(undefined,{hour12:false}))} → ${escapeHtml(end.toLocaleTimeString(undefined,{hour12:false}))} · max el ${mainPass.pass_info.max_elevation.toFixed(1)}°</span>
   `;
 }
@@ -1319,7 +1324,7 @@ function openPassModal(pass){
   backdrop.innerHTML = `
     <div class="modal-card" role="dialog" aria-modal="true" aria-label="Pass details">
       <div class="modal-header">
-        <h3>${escapeHtml(sat.name)} · ${escapeHtml(start.toLocaleString(undefined,{hour12:false}))}</h3>
+        <h3>${escapeHtml(sat.name)}${tagPills(sat)} · ${escapeHtml(start.toLocaleString(undefined,{hour12:false}))}</h3>
         <button class="modal-close" aria-label="Close">×</button>
       </div>
       <div class="modal-body">
