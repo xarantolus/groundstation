@@ -348,14 +348,16 @@ class RecorderService:
             return False
 
     def _write_doppler_file(self, p: Pass) -> None:
-        # Doppler timestamps are seconds-relative to `anchor`, which we fix at
-        # the planned recorder launch time so the same value is used whether
-        # this runs at precompute time (T-3min) or as the inline fallback at
-        # PassStarted. The GR flowgraph anchors rx_time at flowgraph __init__
-        # which lands within ~10s of this anchor, well within doppler tolerance.
+        # Doppler timestamps are UNIX times. The recorder tags its samples
+        # with wall-clock rx_time (DOPPLER_TIMESYNC=rx_time), so the
+        # correction follows the real time even though the recorder starts
+        # a few seconds after the planned launch (container + SDR start-up
+        # on the Pi, or waiting for the SDR after the previous pass). At up
+        # to ~180 Hz/s of Doppler change near culmination, every second of
+        # such delay used to leave ~180 Hz of carrier error.
         path = os.path.join(p.pass_dir, "doppler.txt")
         buffer_s = 60
-        anchor = p.pass_info.start_time - datetime.timedelta(seconds=RECORDING_LEAD_SECONDS)
+        anchor = datetime.datetime.fromtimestamp(0, datetime.timezone.utc)
         start = p.pass_info.start_time - datetime.timedelta(
             seconds=RECORDING_LEAD_SECONDS + buffer_s
         )

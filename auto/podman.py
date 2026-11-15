@@ -321,6 +321,8 @@ async def run_recorder(
         envs.append(f"GAIN={sat.gain}")
     if sat.doppler_correction:
         envs.append("CORRECT_DOPPLER=1")
+    # doppler.txt holds UNIX times; sync the correction on wall-clock rx_time.
+    envs.append("DOPPLER_TIMESYNC=rx_time")
     container_name = f"{RECORDER_PREFIX}{uuid.uuid4().hex[:12]}"
     cmd: List[str] = [
         "podman",

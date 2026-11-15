@@ -46,7 +46,9 @@ async def test_stopped_recorder_is_removed_and_leftovers_cleared(tmp_path: Path,
     await asyncio.wait_for(task, 30)
 
     calls = log.read_text().splitlines()
-    name = next(c.split("--name ")[1].split()[0] for c in calls if c.startswith("run "))
+    run = next(c for c in calls if c.startswith("run "))
+    name = run.split("--name ")[1].split()[0]
+    assert "-e DOPPLER_TIMESYNC=rx_time" in run
     # The leftover from an earlier recording is removed before the new one starts.
     first_run = next(i for i, c in enumerate(calls) if c.startswith("run "))
     assert any("rm" in c and "gs-recorder-leftover1" in c for c in calls[:first_run])

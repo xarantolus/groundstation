@@ -57,6 +57,20 @@ blocks:
     coordinate: [1056, 144.0]
     rotation: 0
     state: enabled
+- name: doppler_timesync
+  id: variable
+  parameters:
+    comment: 'rx_time: doppler.txt holds UNIX times and the correction
+
+      follows the wall clock. Empty: seconds since the first sample.'
+    value: os.getenv("DOPPLER_TIMESYNC", "").strip()
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [1056, 216.0]
+    rotation: 0
+    state: enabled
 - name: frequency
   id: variable
   parameters:
@@ -219,7 +233,8 @@ blocks:
 - name: epy_block_0
   id: epy_block
   parameters:
-    _source_code: "import time\nimport pmt\nimport numpy as np\nfrom gnuradio import gr\n\n\nclass blk(gr.sync_block):\n    \"\"\"Tag rx_time periodically with time relative to flowgraph start\n    (self._anchor captured at __init__). Lets the same doppler.txt\n    correct a later replay of recording.bin without external clock\n    state, since the doppler block sample-count timeline starts at 0\n    in both cases.\n    \"\"\"\n\n    def __init__(self, tag_interval_s=1.0):\n        gr.sync_block.__init__(\n            self,\n            name=\"rx_time tagger\",\n            in_sig=[np.complex64],\n            out_sig=[np.complex64],\n        )\n        self._interval = float(tag_interval_s)\n        self._anchor = time.time()\n        self._last_tag_time = -float(\"inf\")\n\n    def work(self, input_items, output_items):\n        n = len(input_items[0])\n        output_items[0][:n] = input_items[0][:n]\n        if n > 0:\n            now = time.time() - self._anchor\n            if now - self._last_tag_time >= self._interval:\n                full = int(now)\n                frac = now - full\n                self.add_item_tag(\n                    0,\n                    self.nitems_written(0) + n - 1,\n                    pmt.intern(\"rx_time\"),\n                    pmt.make_tuple(pmt.from_uint64(full), pmt.from_double(frac)),\n                )\n                self._last_tag_time = now\n        return n\n"
+    _source_code: "import time\nimport pmt\nimport numpy as np\nfrom gnuradio import gr\n\n\nclass blk(gr.sync_block):\n    \"\"\"Tag rx_time about once per tag_interval_s.\n\n    absolute=True: the tag holds UNIX time, so a doppler correction block\n    synced on rx_time follows the wall clock and a late recorder start\n    does not shift the correction. absolute=False: seconds since this\n    block was created.\n    \"\"\"\n\n    def __init__(self, tag_interval_s=1.0, absolute=False):\n        gr.sync_block.__init__(\n            self,\n            name=\"rx_time tagger\",\n            in_sig=[np.complex64],\n            out_sig=[np.complex64],\n        )\n        self._interval = float(tag_interval_s)\n        self._anchor = 0.0 if absolute else time.time()\n        self._last_tag_time = -float(\"inf\")\n\n    def work(self, input_items, output_items):\n        n = len(input_items[0])\n        output_items[0][:n] = input_items[0][:n]\n        if n > 0:\n            now = time.time() - self._anchor\n            if now - self._last_tag_time >= self._interval:\n                full = int(now)\n                frac = now - full\n                self.add_item_tag(\n                    0,\n                    self.nitems_written(0) + n - 1,\n                    pmt.intern(\"rx_time\"),\n                    pmt.make_tuple(pmt.from_uint64(full), pmt.from_double(frac)),\n                )\n                self._last_tag_time = now\n        return n\n"
+    absolute: bool(doppler_timesync)
     affinity: ''
     alias: ''
     comment: ''
@@ -227,11 +242,7 @@ blocks:
     minoutbuf: '0'
     tag_interval_s: '1'
   states:
-    _io_cache: ('rx_time tagger', 'blk', [('tag_interval_s', '1.0')], [('0', 'complex',
-      1)], [('0', 'complex', 1)], "Tag rx_time periodically with time relative to
-      flowgraph start\n(self._anchor captured at __init__). Lets the same doppler.txt\ncorrect
-      a later replay of recording.bin without external clock\nstate, since the doppler
-      block sample-count timeline starts at 0\nin both cases.\n", [])
+    _io_cache: "('rx_time tagger', 'blk', [('tag_interval_s', '1.0'), ('absolute', 'False')], [('0', 'complex', 1)], [('0', 'complex', 1)], 'Tag rx_time about once per tag_interval_s.\\n\\n    absolute=True: the tag holds UNIX time, so a doppler correction block\\n    synced on rx_time follows the wall clock and a late recorder start\\n    does not shift the correction. absolute=False: seconds since this\\n    block was created.\\n    ', [])"
     bus_sink: false
     bus_source: false
     bus_structure: null
@@ -728,7 +739,7 @@ blocks:
     minoutbuf: '0'
     samp_rate: samp_rate
     t0: '0'
-    timesync_tag: '""'
+    timesync_tag: doppler_timesync
   states:
     bus_sink: false
     bus_source: false

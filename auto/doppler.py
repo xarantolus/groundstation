@@ -38,10 +38,9 @@ def write_doppler_file(
     """Generate a gr-satellites Doppler correction file.
 
     Format matches gr-satellites' ``satellites_doppler_correction`` block:
-    one ``<seconds_since_anchor>\\t<doppler_hz>`` line per sample. Storing
-    relative seconds (rather than absolute unix timestamps) lets the same
-    file correct a replay of recording.bin without any external clock —
-    the doppler block's default sample-count timeline lines up directly.
+    one ``<seconds_since_anchor>\\t<doppler_hz>`` line per sample. The
+    recorder passes the UNIX epoch as anchor, i.e. absolute UNIX times, and
+    syncs the correction block on wall-clock rx_time tags.
     """
     if end <= start:
         raise ValueError("doppler end must be after start")
