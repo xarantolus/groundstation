@@ -90,6 +90,21 @@ blocks:
     coordinate: [384, 136.0]
     rotation: 0
     state: enabled
+- name: clk_bw
+  id: variable
+  parameters:
+    comment: "Clock recovery loop bandwidth relative to the baud rate\n(gr-satellites\
+      \ default 0.06). The demodulator scales its output by\n1/deviation, and AX100\
+      \ satellites deviate less than that, so the\nloop runs with less gain than\
+      \ intended; 0.3 decoded the most on\nrecorded passes. Override with CLK_BW."
+    value: float(os.getenv("CLK_BW", "0.3"))
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [384, 216.0]
+    rotation: 0
+    state: enabled
 - name: golay_header_len
   id: variable
   parameters:
@@ -289,7 +304,7 @@ blocks:
     iq: 'True'
     maxoutbuf: '0'
     minoutbuf: '0'
-    options: '"--deviation " + str(deviation)'
+    options: '"--deviation " + str(deviation) + " --clk_bw " + str(clk_bw)'
     samp_rate: dec_samp_rate
     subaudio: 'False'
   states:
