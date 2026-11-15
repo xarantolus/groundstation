@@ -43,8 +43,8 @@ blocks:
 - name: target_sps
   id: variable
   parameters:
-    comment: Target samples-per-symbol after decimation
-    value: '8'
+    comment: Target samples-per-symbol after decimation. Override with TARGET_SPS.
+    value: int(os.getenv("TARGET_SPS", "8"))
   states:
     bus_sink: false
     bus_source: false
@@ -118,6 +118,34 @@ blocks:
     bus_source: false
     bus_structure: null
     coordinate: [384, 296.0]
+    rotation: 0
+    state: enabled
+- name: pre_cut
+  id: variable
+  parameters:
+    comment: "Channel filter cutoff and transition width in multiples of the\nbaud\
+      \ rate (PRE_CUT, PRE_TRANS). It sits in front of the FLL, so it\nmust pass\
+      \ the carrier offset the FLL is meant to remove. For\nsatellites with poor\
+      \ orbital elements (fresh launches, kHz of\nDoppler error) PRE_CUT=3 TARGET_SPS=12\
+      \ decodes far more; with\ngood elements the default loses less to noise."
+    value: float(os.getenv("PRE_CUT", "1.5"))
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [384, 376.0]
+    rotation: 0
+    state: enabled
+- name: pre_trans
+  id: variable
+  parameters:
+    comment: ''
+    value: float(os.getenv("PRE_TRANS", "0.75" if pre_cut <= 2 else "1.0"))
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [384, 456.0]
     rotation: 0
     state: enabled
 - name: golay_header_len
@@ -250,7 +278,7 @@ blocks:
     maxoutbuf: '0'
     minoutbuf: '0'
     samp_rate: samp_rate
-    taps: firdes.low_pass(1, samp_rate, baud_rate * 1.5, baud_rate * 0.75)
+    taps: firdes.low_pass(1, samp_rate, baud_rate * pre_cut, baud_rate * pre_trans)
     type: ccc
   states:
     bus_sink: false
