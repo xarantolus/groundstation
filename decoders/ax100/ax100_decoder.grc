@@ -80,9 +80,10 @@ blocks:
   id: variable
   parameters:
     comment: "FSK deviation in Hz; also sets the demodulator's Carson filter\n(deviation\
-      \ + baud/2). AX100 satellites use ~baud/3..baud/2; 0.75*baud decoded\nthe\
-      \ most on recorded passes. Override per satellite with DEVIATION."
-    value: float(os.getenv("DEVIATION", baud_rate * 0.75))
+      \ + baud/2). AX100 satellites use ~baud/3..baud/2. With the FLL\ncentring the\
+      \ carrier, 0.4*baud decoded the most on recorded passes.\nOverride per satellite\
+      \ with DEVIATION."
+    value: float(os.getenv("DEVIATION", baud_rate * 0.4))
   states:
     bus_sink: false
     bus_source: false
