@@ -105,6 +105,20 @@ blocks:
     coordinate: [384, 216.0]
     rotation: 0
     state: enabled
+- name: fll_bw
+  id: variable
+  parameters:
+    comment: "Loop bandwidth of the band-edge FLL that tracks the carrier\nleft\
+      \ over after Doppler correction (station crystal, satellite\nTX offset, orbit\
+      \ error). 0.5-1.0 decoded the most on recorded\npasses. Override with FLL_BW."
+    value: float(os.getenv("FLL_BW", "0.5"))
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [384, 296.0]
+    rotation: 0
+    state: enabled
 - name: golay_header_len
   id: variable
   parameters:
@@ -244,6 +258,26 @@ blocks:
     coordinate: [408, 240.0]
     rotation: 0
     state: enabled
+- name: digital_fll_band_edge_cc_0
+  id: digital_fll_band_edge_cc
+  parameters:
+    affinity: ''
+    alias: ''
+    comment: ''
+    filter_size: int(2 * dec_samp_rate / baud_rate + 1) | 1
+    maxoutbuf: '0'
+    minoutbuf: '0'
+    rolloff: '0.5'
+    samps_per_sym: dec_samp_rate / baud_rate
+    type: cc
+    w: fll_bw
+  states:
+    bus_sink: false
+    bus_source: false
+    bus_structure: null
+    coordinate: [600, 240.0]
+    rotation: 0
+    state: enabled
 - name: import_0_1
   id: import
   parameters:
@@ -354,7 +388,8 @@ connections:
 - [blocks_file_source_0_0, '0', freq_xlating_fir_filter_xxx_0, '0']
 - [digital_binary_slicer_fb_0, '0', digital_correlate_access_code_tag_xx_0, '0']
 - [digital_correlate_access_code_tag_xx_0, '0', satellites_fixedlen_to_pdu_0, '0']
-- [freq_xlating_fir_filter_xxx_0, '0', satellites_fsk_demodulator_0, '0']
+- [digital_fll_band_edge_cc_0, '0', satellites_fsk_demodulator_0, '0']
+- [freq_xlating_fir_filter_xxx_0, '0', digital_fll_band_edge_cc_0, '0']
 - [satellites_fixedlen_to_pdu_0, pdus, satellites_u482c_decode_0, in]
 - [satellites_fsk_demodulator_0, '0', digital_binary_slicer_fb_0, '0']
 - [satellites_u482c_decode_0, out, blocks_message_debug_0, print]
