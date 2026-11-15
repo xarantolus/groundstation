@@ -164,7 +164,8 @@ satellites:
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
         env:
-          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+          # 96 kS/s fits at most 32000 baud (filter cutoff 1.5 x baud < 48 kHz).
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200]
           # Narrow FSK (gr-satellites: 750 Hz at 2k4); the 0.75*baud default
           # loses its packets.
           DEVIATION: 750
@@ -262,7 +263,8 @@ satellites:
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
         env:
-          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+          # 96 kS/s fits at most 32000 baud (filter cutoff 1.5 x baud < 48 kHz).
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200]
     iq_upload: always
 
   - name: SNIPE-1
@@ -339,7 +341,8 @@ satellites:
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
         env:
-          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+          # 96 kS/s fits at most 32000 baud (filter cutoff 1.5 x baud < 48 kHz).
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200]
     iq_upload: always
   - name: UND ROADS 1
     norad: 64535
@@ -358,7 +361,8 @@ satellites:
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
         env:
-          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+          # 96 kS/s fits at most 32000 baud (filter cutoff 1.5 x baud < 48 kHz).
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200]
 
     iq_upload: always
   - name: UND ROADS 2
@@ -378,7 +382,8 @@ satellites:
         container: ghcr.io/xarantolus/groundstation/ax100-decoder:latest
         min_size_bytes: 1
         env:
-          BAUD_RATE: [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200]
+          # 96 kS/s fits at most 32000 baud (filter cutoff 1.5 x baud < 48 kHz).
+          BAUD_RATE: [1200, 2400, 4800, 9600, 19200]
     iq_upload: always
   - name: BEE-1000
     norad: 66650
