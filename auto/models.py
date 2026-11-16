@@ -177,6 +177,17 @@ TERMINAL_STATUSES = frozenset(
 )
 
 
+class UploadedFile(BaseModel):
+    """One file of a pass that reached the NAS."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str  # relative to the pass directory on the NAS
+    label: str | None = None
+    size: int | None = None  # bytes on the NAS (compressed size for .zst)
+    ts: datetime.datetime | None = None
+
+
 class Pass(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -197,6 +208,7 @@ class Pass(BaseModel):
     iq_consumers_pending: List[str] = Field(default_factory=list)
     iq_consumers_done: List[str] = Field(default_factory=list)
     iq_upload_confirmed: bool = False
+    uploads: List[UploadedFile] = Field(default_factory=list)
     interrupted: bool = False
     created_at: datetime.datetime = Field(default_factory=datetime.datetime.now)
     updated_at: datetime.datetime = Field(default_factory=datetime.datetime.now)

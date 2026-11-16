@@ -137,6 +137,7 @@ class WebService:
             E.PassEnded,
             E.PassStatusChanged,
             E.PassImagesChanged,
+            E.PassUploadsChanged,
             E.RecordingStarted,
             E.RecordingCompleted,
             E.RecordingFailed,

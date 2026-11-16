@@ -5,7 +5,7 @@ from typing import List, Literal, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import Pass, PassStatus, TransferRequest
+from .models import Pass, PassStatus, TransferRequest, UploadedFile
 
 
 class _EventBase(BaseModel):
@@ -53,6 +53,14 @@ class PassStatusChanged(_EventBase):
     pass_id: str
     status: PassStatus
     reason: str | None = None
+
+
+class PassUploadsChanged(_EventBase):
+    """A file of the pass reached the NAS; carries the full list so far."""
+
+    type: Literal["pass_uploads_changed"] = "pass_uploads_changed"
+    pass_id: str
+    uploads: List[UploadedFile]
 
 
 class PassImagesChanged(_EventBase):
@@ -194,6 +202,7 @@ Event = Union[
     PassEnded,
     PassStatusChanged,
     PassImagesChanged,
+    PassUploadsChanged,
     RecordingStarted,
     RecordingLog,
     RecordingCompleted,

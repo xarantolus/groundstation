@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import datetime
 import errno
 import logging
 import os
@@ -13,7 +14,7 @@ from typing import Callable, Deque, Dict, List, Optional
 from . import events as E
 from .bus import EventBus
 from .decode_gate import DecodeGate
-from .models import GroundstationConfig, IQ_DATA_FILE_EXTENSION, TransferRequest
+from .models import GroundstationConfig, IQ_DATA_FILE_EXTENSION, Pass, TransferRequest, UploadedFile
 from .state import StateStore
 
 logger = logging.getLogger("groundstation.transfer")
@@ -26,6 +27,27 @@ MAX_ATTEMPTS = 3
 DISK_FULL_BACKOFF_INITIAL = 60
 DISK_FULL_BACKOFF_MAX = 600
 MAX_DISK_RETRIES = 60
+
+
+def uploaded_file_for(
+    p: Pass,
+    source: str,
+    dest: str,
+    label: Optional[str] = None,
+    size: Optional[int] = None,
+    ts: "Optional[datetime.datetime]" = None,
+) -> UploadedFile:
+    """Describe an upload of `source` (a file in the pass dir) to `dest`.
+
+    The path is the file's place in the pass directory, with `.zst` added
+    when it was compressed on the way.
+    """
+    rel = os.path.relpath(source, p.pass_dir)
+    if rel.startswith(".."):
+        rel = os.path.basename(dest)
+    if dest.endswith(".zst") and not rel.endswith(".zst"):
+        rel += ".zst"
+    return UploadedFile(path=rel, label=label, size=size, ts=ts)
 
 
 def _is_disk_full(error: BaseException) -> bool:
@@ -50,8 +72,12 @@ class TransferService:
         state: StateStore,
         gate: Optional[DecodeGate] = None,
         num_workers: int = 4,
+        passes: Optional[Dict[str, Pass]] = None,
     ) -> None:
         self._cfg = cfg
+        # Shared pass table: each finished upload is recorded on its pass so
+        # the UI can show which files of a pass reached the NAS.
+        self._passes = passes
         self._bus = bus
         self._state = state
         self._gate = gate
@@ -125,6 +151,24 @@ class TransferService:
                 raise
             except Exception:
                 logger.exception("worker %d: unhandled error", worker_id)
+
+    async def _record_on_pass(
+        self,
+        req: TransferRequest,
+        source: str,
+        dest: str,
+        size: Optional[int],
+        ts: "datetime.datetime",
+    ) -> None:
+        p = self._passes.get(req.pass_id) if (self._passes is not None and req.pass_id) else None
+        if p is None:
+            return
+        entry = uploaded_file_for(p, source, dest, label=req.label, size=size, ts=ts)
+        p.uploads = [u for u in p.uploads if u.path != entry.path] + [entry]
+        await self._state.save_pass_async(p)
+        await self._bus.publish(
+            E.PassUploadsChanged(pass_id=p.id, uploads=[u.model_copy() for u in p.uploads])
+        )
 
     async def _process(self, req: TransferRequest, loop: asyncio.AbstractEventLoop) -> None:
         original_source = req.source_path
@@ -239,6 +283,11 @@ class TransferService:
             await self._handle_failure(req, original_source, working_source, working_dest, e)
             return
 
+        try:
+            uploaded_size: Optional[int] = os.path.getsize(working_source)
+        except OSError:
+            uploaded_size = None
+
         if not req.keep_source:
             # If we compressed, working_source (.zst) AND original_source (.bin)
             # may both exist on disk. Clean up both.
@@ -272,6 +321,7 @@ class TransferService:
             },
         )
         await self._bus.publish(event)
+        await self._record_on_pass(req, original_source, working_dest, uploaded_size, event.ts)
 
         try:
             parent = os.path.dirname(working_source)

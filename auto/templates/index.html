@@ -119,6 +119,12 @@
   .modal-gallery figure.wide{grid-column:1/-1}
   .modal-gallery img{width:100%;height:auto;display:block;border-radius:4px;background:#000}
   .modal-gallery figcaption{color:var(--text2);font-size:.8em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .upload-count{margin-left:.4em;color:var(--text2);font-size:.85em;white-space:nowrap}
+  .modal-uploads{margin:0;padding:0;list-style:none;font-size:.9em;display:grid;gap:.15rem}
+  .modal-uploads li{display:flex;gap:1rem;justify-content:space-between;min-width:0}
+  .modal-uploads .path{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,monospace}
+  .modal-uploads .size{color:var(--text2);white-space:nowrap}
+  .modal-section-title{color:var(--text2);font-size:.85em;margin:0 0 .35rem}
   .modal-gallery-missing{color:var(--text2);font-size:.9em;text-align:center;padding:1rem}
 </style>
 </head>
@@ -175,7 +181,7 @@ const COMPASS = ["N","NE","E","SE","S","SW","W","NW"];
 const compass = az => COMPASS[Math.floor((((az+22.5)%360)+360)%360/45)];
 const DECODER_LOG_CAP = 300;
 const MAIN_LOG_CAP = 500;
-const LIVE_TICK_MS = 1000;
+const LIVE_TICK_MS = 100;
 const TRACK_SAMPLES = 160;
 const EARTH_R_KM = 6378.137;
 const MAP_WIDTH_KM = 10000;    // visible width of the regional map, centered on station
@@ -270,7 +276,7 @@ function renderPasses(){
     const norad = p.satellite.norad;
     const name = escapeHtml(p.satellite.name);
     const nameHtml = norad ? `<a href="https://www.n2yo.com/satellite/?s=${encodeURIComponent(norad)}" target="_blank" rel="noreferrer" data-stop-row>${name}</a>` : name;
-    return `<tr class="${cls.join(' ')}" data-pass-id="${escapeHtml(p.id)}"><td>${nameHtml}${tagPills(p.satellite)}</td><td class="cell-start">${escapeHtml(startStr)}</td><td class="cell-duration">${escapeHtml(durationStr)}</td><td>${p.pass_info.max_elevation.toFixed(1)}°</td><td>${dir}</td><td>${statusPill(p)}</td></tr>`;
+    return `<tr class="${cls.join(' ')}" data-pass-id="${escapeHtml(p.id)}"><td>${nameHtml}${tagPills(p.satellite)}</td><td class="cell-start">${escapeHtml(startStr)}</td><td class="cell-duration">${escapeHtml(durationStr)}</td><td>${p.pass_info.max_elevation.toFixed(1)}°</td><td>${dir}</td><td>${statusPill(p)}${uploadCount(p)}</td></tr>`;
   });
   body.innerHTML = rows.join("");
 }
@@ -436,6 +442,10 @@ function applyEvent(ev){
     const p = state.passes.find(x => x.id === ev.pass_id);
     if (p){ p.status = ev.status; p.status_reason = ev.reason; }
     renderPasses(); updateOpenModal(ev.pass_id);
+  } else if (t === 'pass_uploads_changed'){
+    const p = state.passes.find(x => x.id === ev.pass_id);
+    if (p) p.uploads = ev.uploads || [];
+    renderPasses(); updateOpenModal(ev.pass_id);
   } else if (t === 'pass_images_changed'){
     const p = state.passes.find(x => x.id === ev.pass_id);
     if (p) p.images = ev.images;
@@ -519,6 +529,23 @@ function statusPill(p){
   return `<span class="status-pill status-${escapeHtml(p.status)}"${title}>${label}</span>`;
 }
 
+function uploadCount(p){
+  const ups = p.uploads || [];
+  if (!ups.length) return '';
+  const title = ups.map(u => u.path).join('\n');
+  return `<span class="upload-count" title="${escapeHtml(title)}">⬆ ${ups.length}</span>`;
+}
+
+function uploadsHtml(pass){
+  const ups = pass.uploads || [];
+  if (!ups.length) return '<div class="modal-section-title">Uploaded to NAS</div><div class="dim">No files uploaded (yet).</div>';
+  const items = ups.map(u => {
+    const size = (typeof u.size === 'number') ? fmtBytes(u.size) : '';
+    return `<li><span class="path" title="${escapeHtml(u.label || u.path)}">${escapeHtml(u.path)}</span><span class="size">${escapeHtml(size)}</span></li>`;
+  }).join('');
+  return `<div class="modal-section-title">Uploaded to NAS (${ups.length})</div><ul class="modal-uploads">${items}</ul>`;
+}
+
 function galleryHtml(pass){
   const images = pass.images || [];
   if (!images.length) return '<div class="modal-gallery-missing">No images for this pass (yet).</div>';
@@ -539,6 +566,8 @@ function updateOpenModal(pass_id, fallback){
   if (status) status.innerHTML = statusPill(p) + (p.status_reason ? ` <span class="dim">${escapeHtml(p.status_reason)}</span>` : '');
   const gallery = modal.querySelector('#modal-gallery');
   if (gallery) gallery.innerHTML = galleryHtml(p);
+  const uploads = modal.querySelector('#modal-uploads');
+  if (uploads) uploads.innerHTML = uploadsHtml(p);
 }
 
 function renderAll(){ renderPasses(); renderTransfers(); renderDecoder(); renderLogs(); }
@@ -1340,6 +1369,7 @@ function openPassModal(pass){
           <span class="k">Bandwidth</span><span>${(sat.bandwidth/1e3).toFixed(1)} kHz</span>
           <span class="k">NORAD</span><span>${escapeHtml(sat.norad)}</span>
         </div>
+        <div id="modal-uploads"></div>
         <div id="modal-gallery"></div>
       </div>
     </div>`;

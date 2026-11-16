@@ -148,6 +148,11 @@ class ViewModel:
         elif isinstance(event, (E.RecordingCompleted, E.RecordingFailed)):
             if self.recording_pass_id == event.pass_id:
                 self.recording_pass_id = None
+        elif isinstance(event, E.PassUploadsChanged):
+            for p in self.passes:
+                if p.id == event.pass_id:
+                    p.uploads = [u.model_copy() for u in event.uploads]
+                    break
         elif isinstance(event, E.DecodeQueued):
             self.decoders_pending.add((event.pass_id, event.decoder_index))
         elif isinstance(event, E.DecodeStarted):

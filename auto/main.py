@@ -28,7 +28,7 @@ from .recorder import RecorderService
 from .scheduler import SchedulerService
 from .skymap import CONSUMER_NAME as SKYMAP_CONSUMER, SkymapService
 from .state import StateStore
-from .transfer import TransferService
+from .transfer import TransferService, uploaded_file_for
 from .tui import TUIService
 from .view import ViewModel
 from .artifact_store import ArtifactStore
@@ -271,6 +271,42 @@ def _nas_path(cfg: GroundstationConfig, p: Pass, *parts: str) -> str:
     return os.path.join(prefix, *parts)
 
 
+def _backfill_uploads(state: StateStore, passes_by_id: Dict[str, Pass]) -> int:
+    """Fill in the uploaded files of passes from before uploads were recorded
+    on the pass, using the completed-transfer history. Returns the number of
+    passes updated."""
+    todo = {
+        p.pass_dir.rstrip("/") + "/": p
+        for p in passes_by_id.values()
+        if not p.uploads and p.pass_dir
+    }
+    if not todo:
+        return 0
+    touched: Dict[str, Pass] = {}
+    for entry in state.tail_completed(limit=10**9):
+        source = entry.get("source")
+        dest = entry.get("dest")
+        if not isinstance(source, str) or not isinstance(dest, str):
+            continue
+        p = todo.get(os.path.dirname(source).rstrip("/") + "/")
+        if p is None:
+            # Decoder products can sit in subdirectories of the pass dir.
+            p = next((q for d, q in todo.items() if source.startswith(d)), None)
+        if p is None:
+            continue
+        try:
+            ts = datetime.datetime.fromisoformat(str(entry.get("ts")))
+        except ValueError:
+            ts = None
+        label = entry.get("label") if isinstance(entry.get("label"), str) else None
+        item = uploaded_file_for(p, source, dest, label=label, ts=ts)
+        p.uploads = [u for u in p.uploads if u.path != item.path] + [item]
+        touched[p.id] = p
+    for p in touched.values():
+        state.save_pass(p)
+    return len(touched)
+
+
 async def _run(cfg: GroundstationConfig, no_tui: bool) -> None:
     loop = asyncio.get_running_loop()
     bus = EventBus()
@@ -301,6 +337,10 @@ async def _run(cfg: GroundstationConfig, no_tui: bool) -> None:
         orphan_count += len(orphans)
     if orphan_count:
         logger.info("boot recovery: released %d orphan IQ consumer slot(s)", orphan_count)
+
+    backfilled = _backfill_uploads(state, passes_by_id)
+    if backfilled:
+        logger.info("boot recovery: filled in uploaded files of %d pass(es)", backfilled)
 
     dropped_transfers = state.compact_transfer_queue()
     dropped_decodes = state.compact_decode_queue()
@@ -351,7 +391,7 @@ async def _run(cfg: GroundstationConfig, no_tui: bool) -> None:
     skymap = SkymapService(cfg, bus, state, passes_by_id)
     # One upload at a time: parallel uploads only fight over the SD card
     # and Wi-Fi.
-    transfer = TransferService(cfg, bus, state, gate=gate, num_workers=1)
+    transfer = TransferService(cfg, bus, state, gate=gate, num_workers=1, passes=passes_by_id)
     web_service = WebService(cfg, bus, view, artifacts, skymap)
 
     # Push recovered passes into view so UIs have something to show immediately
