@@ -55,7 +55,7 @@ def _pass(sat: Satellite, tmp_path: Path) -> Pass:
     )
 
 
-def _cfg(tmp_path: Path, threshold: int | None) -> GroundstationConfig:
+def _cfg(tmp_path: Path, threshold: int | None, backlog: int = 0) -> GroundstationConfig:
     return GroundstationConfig(
         satellites=[_sat(1)],
         nas_directory=str(tmp_path / "nas"),
@@ -63,12 +63,15 @@ def _cfg(tmp_path: Path, threshold: int | None) -> GroundstationConfig:
         location_lon=13.0,
         location_alt=50.0,
         always_record_priority=threshold,
+        skip_decoder_backlog=backlog,
     )
 
 
-def _recorder(tmp_path: Path, threshold: int | None, waiting: int) -> RecorderService:
+def _recorder(
+    tmp_path: Path, threshold: int | None, waiting: int, backlog: int = 0
+) -> RecorderService:
     return RecorderService(
-        _cfg(tmp_path, threshold),
+        _cfg(tmp_path, threshold, backlog),
         EventBus(),
         StateStore(str(tmp_path / "state")),
         decoders_waiting=lambda: waiting,
@@ -76,17 +79,19 @@ def _recorder(tmp_path: Path, threshold: int | None, waiting: int) -> RecorderSe
 
 
 @pytest.mark.parametrize(
-    "threshold,priority,waiting,skip",
+    "threshold,priority,waiting,backlog,skip",
     [
-        (None, 1, 5, False),  # feature disabled
-        (7, 61, 5, False),  # must-record satellite
-        (7, 7, 5, False),  # threshold is inclusive
-        (7, 6, 0, False),  # nothing waiting
-        (7, 6, 1, True),
+        (None, 1, 5, 0, False),  # feature disabled
+        (7, 61, 5, 0, False),  # must-record satellite
+        (7, 7, 5, 0, False),  # threshold is inclusive
+        (7, 6, 0, 0, False),  # nothing waiting
+        (7, 6, 1, 0, True),
+        (7, 6, 10, 10, False),  # backlog at the limit: still recorded
+        (7, 6, 11, 10, True),  # above the limit
     ],
 )
-def test_skip_reason(tmp_path: Path, threshold, priority, waiting, skip):
-    rec = _recorder(tmp_path, threshold, waiting)
+def test_skip_reason(tmp_path: Path, threshold, priority, waiting, backlog, skip):
+    rec = _recorder(tmp_path, threshold, waiting, backlog)
     reason = rec._skip_reason(_pass(_sat(priority), tmp_path))
     assert (reason is not None) == skip
 

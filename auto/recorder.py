@@ -323,11 +323,12 @@ class RecorderService:
         if p.satellite.priority >= threshold:
             return None
         waiting = self._decoders_waiting()
-        if waiting == 0:
+        limit = self._cfg.skip_decoder_backlog
+        if waiting <= limit:
             return None
         return (
             f"priority {p.satellite.priority} < {threshold} "
-            f"and {waiting} decoder run(s) waiting"
+            f"and {waiting} decoder run(s) waiting (limit {limit})"
         )
 
     async def _skip(self, p: Pass, reason: str) -> None:

@@ -442,28 +442,6 @@ satellites:
           PIPELINE_NAME: rtumirea1_uhf
     gain: 30
 
-  - name: VIZARD-ION
-    norad: 61749
-    frequency: 436.870e6
-    bandwidth: 128e3
-    gain: 40
-    sample_rate: 384e3
-    lo_offset: 100e3
-    priority: 2
-    iq_upload: never
-    decoder:
-      - name: waterfall
-        role: waterfall
-        container: ghcr.io/xarantolus/groundstation/waterfall:latest
-      - name: geoscan
-        container: ghcr.io/xarantolus/groundstation/satdump-decoder:latest
-        min_size_bytes: 1
-        # The recording is already doppler-corrected; SatDump's own correction
-        # also needs TLEs, which its settings deliberately never download.
-        args: --enable_doppler=false
-        env:
-          PIPELINE_NAME: vizard_ion_uhf
-
   - name: COLIBRI-S
     norad: 61746
     frequency: 436.835e6
@@ -532,5 +510,7 @@ pass_elevation_threshold_deg: 10
 pass_start_threshold: 5
 update_interval_hours: 24
 # Always record satellites with priority >= 7 (SpaceTeamSat-1, FramSat-1,
-# ASRTU-1, Meteor); skip lower-priority passes while decoders are waiting.
+# ASRTU-1, Meteor); skip lower-priority passes while more than
+# skip_decoder_backlog decoder runs are waiting, so the backlog can drain.
 always_record_priority: 7
+skip_decoder_backlog: 10

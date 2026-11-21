@@ -285,3 +285,6 @@ class GroundstationConfig(BaseModel):
     # priority passes are skipped while decoders are still waiting, so the
     # decode backlog can drain. None: record every pass.
     always_record_priority: int | None = None
+    # Lower-priority passes are only skipped while more than this many
+    # decoder runs are waiting (queued or running).
+    skip_decoder_backlog: int = Field(default=0, ge=0)

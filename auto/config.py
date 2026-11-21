@@ -136,6 +136,7 @@ def load_config(path: str) -> GroundstationConfig:
                 if raw.get("always_record_priority") is not None
                 else None
             ),
+            skip_decoder_backlog=int(raw.get("skip_decoder_backlog", 0)),
         )
     except (ValidationError, ValueError) as e:
         sys.stderr.write(f"{path}: {e}\n")
