@@ -1,24 +1,4 @@
 satellites:
-  - name: SpaceTeamSat-1
-    # Elements from the SatNOGS DB (Space-Track analyst object 99416, not on
-    # CelesTrak): STS1 flies within km of FramSat-1 and CelesTrak's labels for
-    # 2026-203A/B are still being refitted. norad is the CelesTrak fallback.
-    satnogs_id: GCRL-7329-1908-5510-3384
-    norad: 100609
-    frequency: 437.395e6
-    # Wide passband (file size is set by sample_rate) to catch a transmitter
-    # off its nominal frequency; stays clear of the DC spike at -lo_offset.
-    bandwidth: 150e3
-    sample_rate: 384e3
-    lo_offset: 100e3
-    gain: 30
-    priority: 61
-    iq_upload: always
-    decoder:
-      - name: waterfall
-        role: waterfall
-        container: ghcr.io/xarantolus/groundstation/waterfall:latest
-
   - name: FramSat-1
     norad: 100610
     frequency: 435.141e6
@@ -509,7 +489,7 @@ nas_directory: /mnt/nas
 pass_elevation_threshold_deg: 10
 pass_start_threshold: 5
 update_interval_hours: 24
-# Always record satellites with priority >= 7 (SpaceTeamSat-1, FramSat-1,
+# Always record satellites with priority >= 7 (FramSat-1,
 # ASRTU-1, Meteor); skip lower-priority passes while more than
 # skip_decoder_backlog decoder runs are waiting, so the backlog can drain.
 always_record_priority: 7
@@ -517,3 +497,12 @@ skip_decoder_backlog: 10
 # Upload the IQ recording of any pass where one decoder produced 50+ files
 # (e.g. many packets), so it can be re-decoded later.
 iq_upload_min_outputs: 50
+# Golden passes for decoder development: the IQ of AX100 passes with many
+# packets, few packets for the signal bursts seen, or signal but no packets
+# goes to <nas>/golden/<category>/ (up to max_per_satellite each).
+golden:
+  tags: [AX100]
+  min_packets: 50
+  min_bursts: 10
+  few_packets_ratio: 0.3
+  max_per_satellite: 20

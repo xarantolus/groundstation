@@ -22,6 +22,7 @@ from .config import load_config
 from .decode_gate import DecodeGate
 from .decoder import DecoderService
 from .logging_bus import BusLogHandler
+from .golden import iq_destination
 from .models import GroundstationConfig, Pass, PassStatus, TransferRequest, should_upload_iq
 from .pass_predictor import PassPredictor
 from .recorder import RecorderService
@@ -229,7 +230,7 @@ def _boot_recovery(
                     req = TransferRequest(
                         id=str(uuid.uuid4()),
                         source_path=chosen,
-                        destination_path=_nas_path(cfg, p, "recording.bin.zst"),
+                        destination_path=iq_destination(cfg, p),
                         keep_source=False,
                         compress=compress,
                         pass_id=p.id,

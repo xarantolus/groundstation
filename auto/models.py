@@ -204,6 +204,10 @@ class Pass(BaseModel):
     decoders_failed: List[int] = Field(default_factory=list)
     # Most output files a single data decoder produced for this pass.
     max_decoder_outputs: int = 0
+    # Signal bursts counted in the recording (golden-pass check), if measured.
+    signal_bursts: int | None = None
+    # Golden-pass category (see auto/golden.py); its IQ goes to the golden dir.
+    golden: str | None = None
     # Non-decoder consumers of the IQ recording (e.g. the skymap analyzer).
     # `_after_all_decoders` waits for both decoders and consumers before
     # compressing/deleting recording.bin.
@@ -247,6 +251,8 @@ def should_upload_iq(p: Pass, min_outputs: int | None = None) -> bool:
     mode = p.satellite.iq_upload
     if not p.satellite.decoder:
         return False
+    if p.golden is not None:
+        return True
     if min_outputs is not None and p.max_decoder_outputs >= min_outputs:
         return True
     if mode == "never":
@@ -254,6 +260,23 @@ def should_upload_iq(p: Pass, min_outputs: int | None = None) -> bool:
     if mode == "always":
         return True
     return p.data_decoders_done()
+
+
+class GoldenConfig(BaseModel):
+    """Which passes to keep as golden recordings (see auto/golden.py)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # Only satellites with one of these tags (empty: every satellite).
+    tags: List[str] = Field(default_factory=list)
+    # many_packets: the best data decoder produced at least this many files.
+    min_packets: int = Field(default=50, ge=1)
+    # few_packets / signal_no_packets need at least this many signal bursts.
+    min_bursts: int = Field(default=10, ge=1)
+    # few_packets: decoder outputs below this fraction of the bursts.
+    few_packets_ratio: float = Field(default=0.3, gt=0)
+    # Golden passes kept per satellite and category.
+    max_per_satellite: int = Field(default=20, ge=1)
 
 
 class TransferRequest(BaseModel):
@@ -296,6 +319,8 @@ class GroundstationConfig(BaseModel):
     # Upload the IQ of any pass where a data decoder produced at least this
     # many files, even for satellites with iq_upload=never/on_decode.
     iq_upload_min_outputs: int | None = Field(default=None, ge=1)
+    # Keep golden passes for decoder development. None: off.
+    golden: "GoldenConfig | None" = None
     # Lower-priority passes are only skipped while more than this many
     # decoder runs are waiting (queued or running).
     skip_decoder_backlog: int = Field(default=0, ge=0)

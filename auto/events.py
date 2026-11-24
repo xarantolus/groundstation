@@ -63,6 +63,15 @@ class PassUploadsChanged(_EventBase):
     uploads: List[UploadedFile]
 
 
+class PassGoldenChanged(_EventBase):
+    """The golden-pass check ran for a pass (see auto/golden.py)."""
+
+    type: Literal["pass_golden_changed"] = "pass_golden_changed"
+    pass_id: str
+    golden: str | None = None
+    signal_bursts: int | None = None
+
+
 class PassImagesChanged(_EventBase):
     """The set of images kept for a pass (waterfall, decoder products)
     changed; paths are relative to the pass and served under /artifacts/."""
@@ -203,6 +212,7 @@ Event = Union[
     PassStatusChanged,
     PassImagesChanged,
     PassUploadsChanged,
+    PassGoldenChanged,
     RecordingStarted,
     RecordingLog,
     RecordingCompleted,

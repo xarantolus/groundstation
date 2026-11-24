@@ -153,6 +153,12 @@ class ViewModel:
                 if p.id == event.pass_id:
                     p.uploads = [u.model_copy() for u in event.uploads]
                     break
+        elif isinstance(event, E.PassGoldenChanged):
+            for p in self.passes:
+                if p.id == event.pass_id:
+                    p.golden = event.golden
+                    p.signal_bursts = event.signal_bursts
+                    break
         elif isinstance(event, E.DecodeQueued):
             self.decoders_pending.add((event.pass_id, event.decoder_index))
         elif isinstance(event, E.DecodeStarted):

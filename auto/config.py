@@ -137,6 +137,7 @@ def load_config(path: str) -> GroundstationConfig:
                 else None
             ),
             skip_decoder_backlog=int(raw.get("skip_decoder_backlog", 0)),
+            golden=raw.get("golden"),
             iq_upload_min_outputs=(
                 int(raw["iq_upload_min_outputs"])
                 if raw.get("iq_upload_min_outputs") is not None

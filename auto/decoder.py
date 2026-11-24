@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import json
 import logging
 import os
 import uuid
 from typing import Deque, Dict, List, Optional, Set, Tuple
 
 from . import events as E
+from . import golden
 from .bus import EventBus, run_subscriber
 from .decode_gate import DecodeGate
 from .models import (
@@ -19,6 +21,7 @@ from .models import (
     should_upload_iq,
 )
 from .artifact_store import ArtifactStore
+from .golden import iq_destination
 from .lifecycle import set_pass_status
 from .podman import DECODER_KILLED_BY_STOP, DEFAULT_DECODER_TIMEOUT_MINUTES, filter_decoder_outputs, run_decoder
 from .state import StateStore
@@ -490,6 +493,7 @@ class DecoderService:
 
         iq = p.recording_path
         if iq and os.path.isfile(iq):
+            await self._check_golden(p, iq)
             if not should_upload_iq(p, self._cfg.iq_upload_min_outputs):
                 try:
                     os.remove(iq)
@@ -534,14 +538,16 @@ class DecoderService:
                     req = TransferRequest(
                         id=str(uuid.uuid4()),
                         source_path=compressed,
-                        destination_path=self._nas_path(p, "recording.bin.zst"),
+                        destination_path=iq_destination(self._cfg, p),
                         keep_source=False,
                         compress=False,
                         pass_id=p.id,
-                        label=f"{p.satellite.name} IQ",
+                        label=f"{p.satellite.name} IQ" + (" (golden)" if p.golden else ""),
                     )
                     await self._state.transfer_put_async(req)
                     await self._bus.publish(E.TransferQueued(request=req))
+                    if p.golden:
+                        await self._queue_golden_extras(p)
 
         if p.data_decoders_done():
             await set_pass_status(p, PassStatus.DONE, self._state, self._bus)
@@ -550,6 +556,86 @@ class DecoderService:
                 p, PassStatus.FINISHED_WITHOUT_DECODES, self._state, self._bus,
                 reason="no decoder produced output",
             )
+
+    async def _check_golden(self, p: Pass, iq: str) -> None:
+        """Sort the pass into a golden category (auto/golden.py) while its
+        IQ is still on disk; a golden pass's IQ is then always uploaded."""
+        gcfg = self._cfg.golden
+        if p.golden is not None or not golden.applies_to(gcfg, p):
+            return
+        assert gcfg is not None
+        if p.signal_bursts is None and p.max_decoder_outputs < gcfg.min_packets:
+            try:
+                # Like compression: only start in a window clear of recordings.
+                async with self._gate.cpu_slot(
+                    min_safety_minutes=COMPRESSION_START_SAFETY_MINUTES
+                ):
+                    p.signal_bursts = await asyncio.get_running_loop().run_in_executor(
+                        None, golden.count_bursts, iq, float(p.satellite.sample_rate)
+                    )
+            except Exception:
+                logger.exception("golden: burst count failed for %s", p.id)
+        category = golden.classify(gcfg, p.max_decoder_outputs, p.signal_bursts)
+        if category is not None:
+            have = await asyncio.get_running_loop().run_in_executor(
+                None,
+                golden.count_existing,
+                self._cfg.nas_directory,
+                category,
+                p.satellite.name,
+            )
+            if have >= gcfg.max_per_satellite:
+                logger.info(
+                    "golden: %s would be %s, but %d already kept", p.id, category, have
+                )
+                category = None
+        p.golden = category
+        await self._state.save_pass_async(p)
+        await self._bus.publish(
+            E.PassGoldenChanged(pass_id=p.id, golden=category, signal_bursts=p.signal_bursts)
+        )
+        logger.info(
+            "golden: %s outputs=%d bursts=%s -> %s",
+            p.id,
+            p.max_decoder_outputs,
+            p.signal_bursts,
+            category or "not golden",
+        )
+
+    async def _queue_golden_extras(self, p: Pass) -> None:
+        """Copy what a re-run needs next to the golden IQ."""
+        assert p.golden is not None
+        meta = {
+            "pass_id": p.id,
+            "category": p.golden,
+            "satellite": p.satellite.name,
+            "decoder_outputs": p.max_decoder_outputs,
+            "signal_bursts": p.signal_bursts,
+            "sample_rate": p.satellite.sample_rate,
+            "pass_folder": self._nas_path(p),
+        }
+        meta_path = os.path.join(p.pass_dir, "golden.json")
+        try:
+            with open(meta_path, "w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2)
+        except OSError:
+            logger.exception("golden: could not write %s", meta_path)
+        dest = golden.golden_dir(self._cfg.nas_directory, p, p.golden)
+        for name in ("golden.json", "doppler.txt", "doppler_reference.txt", "info.json"):
+            src = os.path.join(p.pass_dir, name)
+            if not os.path.isfile(src):
+                continue
+            req = TransferRequest(
+                id=str(uuid.uuid4()),
+                source_path=src,
+                destination_path=os.path.join(dest, name),
+                keep_source=name != "golden.json",
+                compress=False,
+                pass_id=p.id,
+                label=f"{p.satellite.name} golden {name}",
+            )
+            await self._state.transfer_put_async(req)
+            await self._bus.publish(E.TransferQueued(request=req))
 
     def _nas_path(self, p: Pass, *parts: str) -> str:
         prefix = os.path.join(

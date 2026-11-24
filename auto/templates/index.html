@@ -276,7 +276,7 @@ function renderPasses(){
     const norad = p.satellite.norad;
     const name = escapeHtml(p.satellite.name);
     const nameHtml = norad ? `<a href="https://www.n2yo.com/satellite/?s=${encodeURIComponent(norad)}" target="_blank" rel="noreferrer" data-stop-row>${name}</a>` : name;
-    return `<tr class="${cls.join(' ')}" data-pass-id="${escapeHtml(p.id)}"><td>${nameHtml}${tagPills(p.satellite)}</td><td class="cell-start">${escapeHtml(startStr)}</td><td class="cell-duration">${escapeHtml(durationStr)}</td><td>${p.pass_info.max_elevation.toFixed(1)}°</td><td>${dir}</td><td>${statusPill(p)}${uploadCount(p)}</td></tr>`;
+    return `<tr class="${cls.join(' ')}" data-pass-id="${escapeHtml(p.id)}"><td>${nameHtml}${tagPills(p.satellite)}</td><td class="cell-start">${escapeHtml(startStr)}</td><td class="cell-duration">${escapeHtml(durationStr)}</td><td>${p.pass_info.max_elevation.toFixed(1)}°</td><td>${dir}</td><td>${statusPill(p)}${uploadCount(p)}${goldenPill(p)}</td></tr>`;
   });
   body.innerHTML = rows.join("");
 }
@@ -446,6 +446,10 @@ function applyEvent(ev){
     const p = state.passes.find(x => x.id === ev.pass_id);
     if (p) p.uploads = ev.uploads || [];
     renderPasses(); updateOpenModal(ev.pass_id);
+  } else if (t === 'pass_golden_changed'){
+    const p = state.passes.find(x => x.id === ev.pass_id);
+    if (p){ p.golden = ev.golden; p.signal_bursts = ev.signal_bursts; }
+    renderPasses();
   } else if (t === 'pass_images_changed'){
     const p = state.passes.find(x => x.id === ev.pass_id);
     if (p) p.images = ev.images;
@@ -529,6 +533,13 @@ function statusPill(p){
   return `<span class="status-pill status-${escapeHtml(p.status)}"${title}>${label}</span>`;
 }
 
+const GOLDEN_LABELS = {many_packets:'many packets', few_packets:'few packets for the signal', signal_no_packets:'signal, no packets'};
+function goldenPill(p){
+  if (!p.golden) return '';
+  const label = GOLDEN_LABELS[p.golden] || p.golden;
+  const bursts = p.signal_bursts == null ? '' : `, ${p.signal_bursts} signal bursts`;
+  return `<span class="tag-pill" title="Golden pass: ${escapeHtml(label)}${escapeHtml(bursts)}; IQ kept in golden/${escapeHtml(p.golden)}">★ golden</span>`;
+}
 function uploadCount(p){
   const ups = p.uploads || [];
   if (!ups.length) return '';
