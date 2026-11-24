@@ -202,6 +202,8 @@ class Pass(BaseModel):
     decoders_pending: List[int] = Field(default_factory=list)
     decoders_done: List[int] = Field(default_factory=list)
     decoders_failed: List[int] = Field(default_factory=list)
+    # Most output files a single data decoder produced for this pass.
+    max_decoder_outputs: int = 0
     # Non-decoder consumers of the IQ recording (e.g. the skymap analyzer).
     # `_after_all_decoders` waits for both decoders and consumers before
     # compressing/deleting recording.bin.
@@ -234,14 +236,20 @@ class Pass(BaseModel):
         return f"{safe_name}_{ts}"
 
 
-def should_upload_iq(p: Pass) -> bool:
+def should_upload_iq(p: Pass, min_outputs: int | None = None) -> bool:
     """Decide whether to upload the raw IQ recording for a pass.
 
     `on_decode` (the default) requires that at least one data-producing
     decoder (see RolePolicy) produced output that survived its filters.
+    With `min_outputs` set, a pass where one data decoder produced at least
+    that many files is uploaded whatever the mode (worth re-decoding later).
     """
     mode = p.satellite.iq_upload
-    if mode == "never" or not p.satellite.decoder:
+    if not p.satellite.decoder:
+        return False
+    if min_outputs is not None and p.max_decoder_outputs >= min_outputs:
+        return True
+    if mode == "never":
         return False
     if mode == "always":
         return True
@@ -285,6 +293,9 @@ class GroundstationConfig(BaseModel):
     # priority passes are skipped while decoders are still waiting, so the
     # decode backlog can drain. None: record every pass.
     always_record_priority: int | None = None
+    # Upload the IQ of any pass where a data decoder produced at least this
+    # many files, even for satellites with iq_upload=never/on_decode.
+    iq_upload_min_outputs: int | None = Field(default=None, ge=1)
     # Lower-priority passes are only skipped while more than this many
     # decoder runs are waiting (queued or running).
     skip_decoder_backlog: int = Field(default=0, ge=0)

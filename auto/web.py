@@ -41,6 +41,7 @@ _PASS_WIRE_DROP = (
     "iq_consumers_pending",
     "iq_consumers_done",
     "iq_upload_confirmed",
+    "max_decoder_outputs",
     "interrupted",
     "created_at",
     "updated_at",

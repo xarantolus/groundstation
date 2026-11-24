@@ -442,6 +442,8 @@ class DecoderService:
                 reqs.append(req)
 
             p.decoders_done.append(decoder_index)
+            if decoder.policy.produces_data:
+                p.max_decoder_outputs = max(p.max_decoder_outputs, len(surviving))
             await self._state.save_pass_async(p)
             await self._state.decode_tombstone_async(pass_id, decoder_index)
 
@@ -488,13 +490,14 @@ class DecoderService:
 
         iq = p.recording_path
         if iq and os.path.isfile(iq):
-            if not should_upload_iq(p):
+            if not should_upload_iq(p, self._cfg.iq_upload_min_outputs):
                 try:
                     os.remove(iq)
                     logger.info(
-                        "removed local IQ %s (iq_upload=%s)",
+                        "removed local IQ %s (iq_upload=%s, most decoder outputs %d)",
                         iq,
                         p.satellite.iq_upload,
+                        p.max_decoder_outputs,
                     )
                 except OSError:
                     logger.exception("could not remove IQ %s", iq)

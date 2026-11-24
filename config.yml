@@ -514,3 +514,6 @@ update_interval_hours: 24
 # skip_decoder_backlog decoder runs are waiting, so the backlog can drain.
 always_record_priority: 7
 skip_decoder_backlog: 10
+# Upload the IQ recording of any pass where one decoder produced 50+ files
+# (e.g. many packets), so it can be re-decoded later.
+iq_upload_min_outputs: 50

@@ -200,7 +200,7 @@ def _boot_recovery(
             # between compression and transfer_put. Reconstruct the upload
             # here using whatever survived on disk. Also runs for passes
             # just advanced from DECODING above.
-            if should_upload_iq(p):
+            if should_upload_iq(p, cfg.iq_upload_min_outputs):
                 iq_zst = os.path.join(p.pass_dir, "recording.bin.zst")
                 iq_bin = os.path.join(p.pass_dir, "recording.bin")
                 # A leftover .zst.tmp means a prior compression was killed
