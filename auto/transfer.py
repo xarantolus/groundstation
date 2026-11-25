@@ -12,6 +12,7 @@ import uuid
 from typing import Callable, Deque, Dict, List, Optional
 
 from . import events as E
+from . import golden
 from .bus import EventBus
 from .decode_gate import DecodeGate
 from .models import GroundstationConfig, IQ_DATA_FILE_EXTENSION, Pass, TransferRequest, UploadedFile
@@ -92,6 +93,8 @@ class TransferService:
         self._sub_task: Optional[asyncio.Task] = None
 
         self._active: Dict[str, E.TransferProgress] = {}
+        # Requests a worker is processing (incl. retry back-off sleeps).
+        self._inflight: Dict[str, TransferRequest] = {}
         self._completed_tail: Deque[E.TransferCompleted] = collections.deque(maxlen=50)
         self._active_lock = asyncio.Lock()
 
@@ -145,12 +148,15 @@ class TransferService:
                 req = await self._queue.get()
             except asyncio.CancelledError:
                 raise
+            self._inflight[req.id] = req
             try:
                 await self._process(req, loop)
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("worker %d: unhandled error", worker_id)
+            finally:
+                self._inflight.pop(req.id, None)
 
     async def _record_on_pass(
         self,
@@ -169,6 +175,31 @@ class TransferService:
         await self._bus.publish(
             E.PassUploadsChanged(pass_id=p.id, uploads=[u.model_copy() for u in p.uploads])
         )
+
+    def _pass_pending(self, pass_id: str, except_id: str) -> bool:
+        """Whether other uploads of the pass are still queued or running."""
+        queued = list(self._queue._queue)  # type: ignore[attr-defined]
+        return any(
+            r.pass_id == pass_id and r.id != except_id
+            for r in (*queued, *self._inflight.values())
+        )
+
+    async def _copy_golden(self, req: TransferRequest) -> None:
+        """Once the last upload of a golden pass is done, copy its whole NAS
+        folder into the golden folder (unchanged files are skipped, so this
+        also picks up files that arrive later)."""
+        p = self._passes.get(req.pass_id) if (self._passes is not None and req.pass_id) else None
+        if p is None or p.golden is None or self._cfg is None:
+            return
+        if self._pass_pending(p.id, req.id):
+            return
+        try:
+            n = await asyncio.get_running_loop().run_in_executor(
+                None, golden.copy_pass_folder, self._cfg.nas_directory, p
+            )
+            logger.info("golden: copied %d file(s) of %s into its golden folder", n, p.id)
+        except Exception:
+            logger.exception("golden: copying the pass folder of %s failed", p.id)
 
     async def _process(self, req: TransferRequest, loop: asyncio.AbstractEventLoop) -> None:
         original_source = req.source_path
@@ -322,6 +353,7 @@ class TransferService:
         )
         await self._bus.publish(event)
         await self._record_on_pass(req, original_source, working_dest, uploaded_size, event.ts)
+        await self._copy_golden(req)
 
         try:
             parent = os.path.dirname(working_source)

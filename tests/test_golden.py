@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import datetime
 import os
+import shutil
 from pathlib import Path
 
 import numpy as np
@@ -21,9 +22,11 @@ from auto.models import (
     Pass,
     PassInfo,
     Satellite,
+    TransferRequest,
     should_upload_iq,
 )
 from auto.state import StateStore
+from auto.transfer import TransferService
 
 FS = 96_000.0
 
@@ -143,28 +146,42 @@ async def test_many_packets_skips_the_burst_count(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_golden_extras_include_the_waterfall(tmp_path: Path):
+async def test_golden_folder_copied_after_the_last_upload(tmp_path: Path):
     p = _pass(tmp_path)
     p.golden = "many_packets"
-    (Path(p.pass_dir) / "doppler.txt").write_text("0 0\n")
-    svc = _service(tmp_path, p)
-    # The waterfall upload already removed it from the pass dir; the web
-    # UI's store still has it.
-    (Path(p.pass_dir) / "waterfall.png").write_bytes(b"png")
-    svc._artifacts.add(p.id, p.pass_dir, [Path(p.pass_dir) / "waterfall.png"])
-    (Path(p.pass_dir) / "waterfall.png").unlink()
-    sub = svc._bus.subscribe(E.TransferQueued)
+    nas = tmp_path / "nas"
+    nas_pass = Path(golden.pass_nas_dir(str(nas), p))
+    (nas_pass / "ax100_4800" / "messages").mkdir(parents=True)
+    (nas_pass / "waterfall.png").write_bytes(b"png")
+    (nas_pass / "ax100_4800" / "messages" / "csp_packet_0.bin").write_bytes(b"pkt")
+    (nas_pass / "info.json.part").write_bytes(b"half")  # upload in flight
+    cfg = _service(tmp_path, p)._cfg
+    svc = TransferService(cfg, EventBus(), StateStore(str(tmp_path / "state")),
+                          num_workers=1, passes={p.id: p})
+    dest = nas / "golden" / "many_packets" / "SAT_2026-01-01_12-00-00"
 
-    await svc._queue_golden_extras(p)
+    def upload(name: str) -> TransferRequest:
+        src = Path(p.pass_dir) / name
+        src.write_text(name)
+        return TransferRequest(id=name, source_path=str(src),
+                               destination_path=str(dest / name), keep_source=False,
+                               compress=False, pass_id=p.id)
 
-    reqs = {}
-    for _ in range(3):
-        r = (await asyncio.wait_for(sub.get(), 1)).request
-        reqs[os.path.basename(r.destination_path)] = r
-    dest = tmp_path / "nas" / "golden" / "many_packets" / "SAT_2026-01-01_12-00-00"
-    assert set(reqs) == {"golden.json", "doppler.txt", "waterfall.png"}
-    assert reqs["waterfall.png"].destination_path == str(dest / "waterfall.png")
-    assert reqs["waterfall.png"].keep_source  # the store's copy stays for the UI
+    # Another upload of the pass still queued: no copy yet.
+    await svc._queue.put(upload("later.txt"))
+    await svc._process(upload("golden.json"), asyncio.get_running_loop())
+    assert not (dest / "waterfall.png").exists()
+
+    # The last one: the whole NAS folder is copied.
+    await svc._process(await svc._queue.get(), asyncio.get_running_loop())
+    assert (dest / "waterfall.png").read_bytes() == b"png"
+    assert (dest / "ax100_4800" / "messages" / "csp_packet_0.bin").read_bytes() == b"pkt"
+    assert not (dest / "info.json.part").exists()
+    assert golden.copy_pass_folder(str(nas), p) == 0  # nothing changed
+    # Hard links: deleting the pass folder keeps the golden files.
+    assert (dest / "waterfall.png").stat().st_nlink == 2
+    shutil.rmtree(nas_pass)
+    assert (dest / "waterfall.png").read_bytes() == b"png"
 
 
 @pytest.mark.asyncio

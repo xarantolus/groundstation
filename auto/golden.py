@@ -1,8 +1,10 @@
 """Golden passes: recordings worth keeping for decoder development.
 
 After all decoders of a pass have run, passes of selected satellites are
-sorted into three categories and their IQ recording (plus doppler.txt and
-info.json) is uploaded to <nas>/golden/<category>/<pass folder>/:
+sorted into three categories. A golden pass's IQ recording goes to
+<nas>/golden/<category>/<pass folder>/, together with golden.json and a copy
+of everything in the pass's normal NAS folder (decoder outputs, waterfall,
+doppler.txt, info.json, ...):
 
   many_packets      a decoder produced lots of output (e.g. >= 50 packets)
   few_packets       clear signal bursts, but few packets per burst
@@ -15,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from typing import Optional
 
 import numpy as np
@@ -145,6 +148,40 @@ def pass_nas_dir(nas_directory: str, p: Pass) -> str:
     return os.path.join(
         nas_directory, start.strftime("%Y"), start.strftime("%Y-%m-%d"), pass_folder(p)
     )
+
+
+def copy_pass_folder(nas_directory: str, p: Pass) -> int:
+    """Put everything in the pass's NAS folder into its golden folder as
+    hard links: no data goes over the network, no extra space is used, and
+    the golden copy survives deleting the pass folder. Falls back to a
+    normal copy where linking fails. Files already there with the same size
+    are skipped, as are unfinished uploads (.part). Returns the number of
+    files added."""
+    assert p.golden is not None
+    src_root = pass_nas_dir(nas_directory, p)
+    dest_root = golden_dir(nas_directory, p, p.golden)
+    copied = 0
+    for root, _dirs, files in os.walk(src_root):
+        for name in files:
+            if name.endswith(".part"):
+                continue
+            src = os.path.join(root, name)
+            dest = os.path.join(dest_root, os.path.relpath(src, src_root))
+            try:
+                if os.path.getsize(dest) == os.path.getsize(src):
+                    continue
+            except OSError:
+                pass
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            if os.path.lexists(dest):
+                os.remove(dest)  # different size: replace
+            try:
+                os.link(src, dest)
+            except OSError as e:
+                logger.warning("golden: hard link %s failed (%s), copying", src, e)
+                shutil.copyfile(src, dest)
+            copied += 1
+    return copied
 
 
 def iq_destination(cfg: GroundstationConfig, p: Pass) -> str:

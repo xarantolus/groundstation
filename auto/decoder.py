@@ -603,7 +603,8 @@ class DecoderService:
         )
 
     async def _queue_golden_extras(self, p: Pass) -> None:
-        """Copy what a re-run needs next to the golden IQ."""
+        """Upload golden.json next to the golden IQ. Once the pass's last
+        upload is done, TransferService copies its whole NAS folder there."""
         assert p.golden is not None
         meta = {
             "pass_id": p.id,
@@ -621,24 +622,15 @@ class DecoderService:
         except OSError:
             logger.exception("golden: could not write %s", meta_path)
         dest = golden.golden_dir(self._cfg.nas_directory, p, p.golden)
-        files = [(name, os.path.join(p.pass_dir, name))
-                 for name in ("golden.json", "doppler.txt", "doppler_reference.txt", "info.json")]
-        # The waterfall's own upload removes it from the pass dir; the web
-        # UI's artifact store keeps a copy.
-        waterfall = self._artifacts.path_for(p.id, "waterfall.png")
-        if waterfall is not None:
-            files.append(("waterfall.png", str(waterfall)))
-        for name, src in files:
-            if not os.path.isfile(src):
-                continue
+        if os.path.isfile(meta_path):
             req = TransferRequest(
                 id=str(uuid.uuid4()),
-                source_path=src,
-                destination_path=os.path.join(dest, name),
-                keep_source=name != "golden.json",
+                source_path=meta_path,
+                destination_path=os.path.join(dest, "golden.json"),
+                keep_source=False,
                 compress=False,
                 pass_id=p.id,
-                label=f"{p.satellite.name} golden {name}",
+                label=f"{p.satellite.name} golden golden.json",
             )
             await self._state.transfer_put_async(req)
             await self._bus.publish(E.TransferQueued(request=req))
