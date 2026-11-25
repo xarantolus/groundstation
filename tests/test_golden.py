@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import datetime
+import os
 from pathlib import Path
 
 import numpy as np
@@ -138,6 +140,31 @@ async def test_many_packets_skips_the_burst_count(tmp_path: Path):
     svc = _service(tmp_path, p)
     await svc._check_golden(p, "/does/not/exist")
     assert p.golden == "many_packets" and p.signal_bursts is None
+
+
+@pytest.mark.asyncio
+async def test_golden_extras_include_the_waterfall(tmp_path: Path):
+    p = _pass(tmp_path)
+    p.golden = "many_packets"
+    (Path(p.pass_dir) / "doppler.txt").write_text("0 0\n")
+    svc = _service(tmp_path, p)
+    # The waterfall upload already removed it from the pass dir; the web
+    # UI's store still has it.
+    (Path(p.pass_dir) / "waterfall.png").write_bytes(b"png")
+    svc._artifacts.add(p.id, p.pass_dir, [Path(p.pass_dir) / "waterfall.png"])
+    (Path(p.pass_dir) / "waterfall.png").unlink()
+    sub = svc._bus.subscribe(E.TransferQueued)
+
+    await svc._queue_golden_extras(p)
+
+    reqs = {}
+    for _ in range(3):
+        r = (await asyncio.wait_for(sub.get(), 1)).request
+        reqs[os.path.basename(r.destination_path)] = r
+    dest = tmp_path / "nas" / "golden" / "many_packets" / "SAT_2026-01-01_12-00-00"
+    assert set(reqs) == {"golden.json", "doppler.txt", "waterfall.png"}
+    assert reqs["waterfall.png"].destination_path == str(dest / "waterfall.png")
+    assert reqs["waterfall.png"].keep_source  # the store's copy stays for the UI
 
 
 @pytest.mark.asyncio

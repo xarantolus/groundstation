@@ -621,8 +621,14 @@ class DecoderService:
         except OSError:
             logger.exception("golden: could not write %s", meta_path)
         dest = golden.golden_dir(self._cfg.nas_directory, p, p.golden)
-        for name in ("golden.json", "doppler.txt", "doppler_reference.txt", "info.json"):
-            src = os.path.join(p.pass_dir, name)
+        files = [(name, os.path.join(p.pass_dir, name))
+                 for name in ("golden.json", "doppler.txt", "doppler_reference.txt", "info.json")]
+        # The waterfall's own upload removes it from the pass dir; the web
+        # UI's artifact store keeps a copy.
+        waterfall = self._artifacts.path_for(p.id, "waterfall.png")
+        if waterfall is not None:
+            files.append(("waterfall.png", str(waterfall)))
+        for name, src in files:
             if not os.path.isfile(src):
                 continue
             req = TransferRequest(
